@@ -66,24 +66,78 @@ class AnkiIntegration:
         if mw is None:
             raise RuntimeError("Anki integration is not available outside of Anki")
 
-    def get_current_card_data(self) -> Optional[CardData]:
+    def get_current_card_data(self, deck_manager=None) -> Optional[CardData]:
         """Extract data from the currently displayed card."""
         if not mw.reviewer.card:
             return None
 
         card = mw.reviewer.card
         note = card.note()
-        field_mapping = self.config.field_mapping
 
-        # Extract field values
-        raw_prompt = self._get_field_value(note, field_mapping.prompt)
-        raw_target = self._get_field_value(note, field_mapping.target)
-        raw_audio = self._get_field_value(note, field_mapping.audio) if field_mapping.audio else None
+        # Get deck-specific field mapping if available
+        if deck_manager:
+            deck_info = deck_manager.get_deck_for_card(card.id)
+            if deck_info:
+                field_mapping = deck_info
+                print(f"DEBUG: Using deck-specific field mapping for {deck_info.deck_name}")
+            else:
+                field_mapping = self.config.field_mapping
+                print("DEBUG: Using default field mapping")
+        else:
+            field_mapping = self.config.field_mapping
+
+        # Extract field values - handle both FieldMapping and DeckFieldMapping types
+        if hasattr(field_mapping, 'prompt_field'):
+            # DeckFieldMapping type
+            prompt_field = field_mapping.prompt_field
+            target_field = field_mapping.target_field
+            audio_field = field_mapping.audio_field
+        else:
+            # FieldMapping type (legacy)
+            prompt_field = field_mapping.prompt
+            target_field = field_mapping.target
+            audio_field = field_mapping.audio
+
+        print(f"DEBUG: Extracting fields - Prompt: {prompt_field}, Target: {target_field}, Audio: {audio_field}")
+
+        # Debug: List all available fields in this note
+        try:
+            if hasattr(note, 'note_type'):
+                model = note.note_type()
+            else:
+                model = note.model()
+
+            available_fields = []
+            if hasattr(model, 'flds'):
+                for field_info in model.flds:
+                    if isinstance(field_info, dict):
+                        field_name = field_info.get('name', field_info.get('fldName', ''))
+                    else:
+                        field_name = str(field_info)
+                    available_fields.append(field_name)
+                print(f"DEBUG: Available fields in note: {available_fields}")
+
+            # Also show note.fields count
+            if hasattr(note, 'fields'):
+                print(f"DEBUG: Note has {len(note.fields)} fields")
+                for i, field_val in enumerate(note.fields):
+                    print(f"DEBUG: Field {i}: '{field_val}'")
+
+        except Exception as debug_error:
+            print(f"DEBUG: Error listing available fields: {debug_error}")
+
+        raw_prompt = self._get_field_value(note, prompt_field)
+        raw_target = self._get_field_value(note, target_field)
+        raw_audio = self._get_field_value(note, audio_field) if audio_field else None
+
+        print(f"DEBUG: Raw field values - Prompt: '{raw_prompt}', Target: '{raw_target}', Audio: '{raw_audio}'")
 
         # Process field content to remove HTML tags and clean text
         prompt = self.field_processor.process_field_content(raw_prompt) if raw_prompt else ""
         target = self.field_processor.process_field_content(raw_target) if raw_target else ""
         audio = raw_audio  # Audio field doesn't need processing
+
+        print(f"DEBUG: Processed field values - Prompt: '{prompt}', Target: '{target}', Audio: '{audio}'")
 
         # Clean audio field (remove sound tags if present)
         if audio and audio.startswith("[sound:"):
@@ -621,4 +675,97 @@ class AnkiIntegration:
             return self._get_field_value(note, field_name)
         except Exception as e:
             print(f"Failed to get field content: {e}")
+            return None
+
+    def get_next_card_from_deck(self, deck_manager=None) -> Optional[CardData]:
+        """Get the next card from the current deck when not in review mode."""
+        if not mw or not mw.col:
+            print("DEBUG: No Anki collection available")
+            return None
+
+        try:
+            # Get current deck ID
+            current_deck_id = mw.col.conf.get('curDeck', None)
+            if current_deck_id is None:
+                print("DEBUG: No current deck selected")
+                return None
+
+            # Get card IDs from current deck (new cards first, then due cards)
+            new_card_ids = mw.col.find_cards(f"did:{current_deck_id} is:new")
+            due_card_ids = mw.col.find_cards(f"did:{current_deck_id} is:due")
+
+            # Combine lists, prioritizing new cards
+            card_ids = new_card_ids + due_card_ids
+
+            if not card_ids:
+                print("DEBUG: No cards found in current deck")
+                return None
+
+            print(f"DEBUG: Found {len(card_ids)} cards in current deck")
+
+            # Get the first card that hasn't been recently practiced
+            # For now, just take the first card
+            card_id = card_ids[0]
+            card = mw.col.get_card(card_id)
+
+            if not card:
+                print(f"DEBUG: Could not get card with ID {card_id}")
+                return None
+
+            note = card.note()
+
+            # Get deck-specific field mapping if available
+            if deck_manager:
+                deck_info = deck_manager.get_deck_for_card(card.id)
+                if deck_info:
+                    field_mapping = deck_info
+                    print(f"DEBUG: Using deck-specific field mapping for {deck_info.deck_name}")
+                else:
+                    from ..config import get_config
+                    config = get_config()
+                    field_mapping = config.field_mapping
+                    print("DEBUG: Using default field mapping")
+            else:
+                from ..config import get_config
+                config = get_config()
+                field_mapping = config.field_mapping
+
+            # Extract field values - handle both FieldMapping and DeckFieldMapping types
+            if hasattr(field_mapping, 'prompt_field'):
+                # DeckFieldMapping type
+                prompt_field = field_mapping.prompt_field
+                target_field = field_mapping.target_field
+                audio_field = field_mapping.audio_field
+            else:
+                # FieldMapping type (legacy)
+                prompt_field = field_mapping.prompt
+                target_field = field_mapping.target
+                audio_field = field_mapping.audio
+
+            raw_prompt = self._get_field_value(note, prompt_field)
+            raw_target = self._get_field_value(note, target_field)
+            raw_audio = self._get_field_value(note, audio_field) if audio_field else None
+
+            # Process field content
+            prompt = self.field_processor.process_field_content(raw_prompt) if raw_prompt else ""
+            target = self.field_processor.process_field_content(raw_target) if raw_target else ""
+            audio = raw_audio
+
+            # Clean audio field
+            if audio and audio.startswith("[sound:"):
+                audio = audio[7:-1]
+
+            print(f"DEBUG: Loaded card from deck - Prompt: {prompt[:30]}..., Target: {target[:30]}...")
+
+            return CardData(
+                card_id=card.id,
+                note_id=note.id,
+                prompt=prompt or "",
+                target=target or "",
+                audio=audio,
+                note_type=(note.note_type()["name"] if hasattr(note, 'note_type') else note.model()["name"])
+            )
+
+        except Exception as e:
+            print(f"DEBUG: Error getting next card from deck: {e}")
             return None

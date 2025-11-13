@@ -20,6 +20,7 @@ from ..core.typing_engine import TypingEngine, CharacterState
 from ..core.stats import StatsCollector
 from ..core.hint import HintManager, HintLevel
 from .components.typing_display import TypingDisplayWidget
+from .components.settings_panel import SettingsPanel
 
 
 class TypingDialog(QMainWindow):
@@ -435,14 +436,25 @@ class TypingDialog(QMainWindow):
     def _load_current_card(self) -> None:
         """Load data from the current Anki card."""
         try:
-            # Check if reviewer is still active and has a card
-            if not self.anki_integration.is_reviewer_active():
-                print("DEBUG: No active reviewer or no card available - closing dialog")
-                self.close()
-                return
+            # Get deck manager for field mappings
+            from ..utils import get_deck_manager
+            deck_manager = get_deck_manager()
 
-            # Get current card data from Anki (whatever card Anki has transitioned to)
-            new_card_data = self.anki_integration.get_current_card_data()
+            # Check if reviewer is active and get card data
+            if self.anki_integration.is_reviewer_active():
+                # Review mode: get current displayed card
+                new_card_data = self.anki_integration.get_current_card_data(deck_manager=deck_manager)
+                print("DEBUG: Loaded card from active reviewer")
+            else:
+                # Non-review mode: get next card from current deck
+                new_card_data = self.anki_integration.get_next_card_from_deck(deck_manager=deck_manager)
+                if new_card_data:
+                    print("DEBUG: Loaded card from deck in non-review mode")
+                else:
+                    print("DEBUG: No cards available in current deck - closing dialog")
+                    self.close()
+                    return
+
             if not new_card_data or not new_card_data.target.strip():
                 print("DEBUG: No card data or empty target - session might be complete")
                 self.close()
@@ -453,6 +465,13 @@ class TypingDialog(QMainWindow):
             # Always update components to ensure UI is fresh
             print(f"DEBUG: Updating components with card data")
             self.card_data = new_card_data
+
+            # Update deck information and card count
+            current_deck_info = deck_manager.get_current_deck_info()
+            if current_deck_info:
+                print(f"DEBUG: Current deck: {current_deck_info.deck_name}")
+                # Update deck card count if needed
+                deck_manager.update_card_count(current_deck_info.deck_name, 1)
 
             # Reset stats
             if self.stats_collector.is_running():
@@ -663,31 +682,32 @@ class TypingDialog(QMainWindow):
                 QMessageBox.information(self, "Practice Given Up",
                                        "Don't worry! Keep practicing and you'll improve.")
 
-        # Submit to Anki with automatic card progression
-        print("DEBUG: Starting Anki card submission...")
+        # Submit to Anki or handle based on reviewer state
+        print("DEBUG: Starting card completion...")
         try:
-            # First check if reviewer is still active
-            if not self.anki_integration.is_reviewer_active():
-                print("DEBUG: Reviewer is not active, cannot submit card")
-                QMessageBox.warning(self, "Warning", "Cannot submit card - no active reviewer")
-                self._finishing = False
-                return
+            if self.anki_integration.is_reviewer_active():
+                # Review mode: submit card to Anki
+                print("DEBUG: Submitting card in review mode")
+                self.anki_integration.answer_card_and_next(rating)
+                print("DEBUG: Card submitted to Anki")
 
-            # Submit the card
-            print("DEBUG: Calling answer_card_and_next...")
-            self.anki_integration.answer_card_and_next(rating)
-            print("DEBUG: answer_card_and_next completed")
-
-            # Write stats to card
-            print("DEBUG: Writing stats to card...")
-            self.anki_integration._write_stats_to_card(practice_stats, "TypingStats")
-            print("DEBUG: Stats written to card")
+                # Write stats to card
+                print("DEBUG: Writing stats to card...")
+                self.anki_integration._write_stats_to_card(practice_stats, "TypingStats")
+                print("DEBUG: Stats written to card")
+            else:
+                # Non-review mode: just log the practice
+                print("DEBUG: Practice completed in non-review mode - no submission to Anki")
+                # Could potentially save practice stats elsewhere if needed
 
         except Exception as e:
-            print(f"ERROR: Could not submit to Anki: {e}")
+            print(f"ERROR: Could not complete card submission: {e}")
             import traceback
             traceback.print_exc()
-            QMessageBox.warning(self, "Warning", f"Could not submit card to Anki: {e}")
+            if self.anki_integration.is_reviewer_active():
+                QMessageBox.warning(self, "Warning", f"Could not submit card to Anki: {e}")
+            else:
+                print("WARNING: Error in non-review mode completion - continuing anyway")
 
         # Emit completion signal
         self.card_completed.emit(rating)
@@ -757,12 +777,19 @@ class TypingDialog(QMainWindow):
             if self.stats_collector.is_running():
                 self.stats_collector.end_session()
 
-            # Answer current card with 'Again' rating (Anki will auto-transition)
-            self.anki_integration.answer_card_and_next(1)
+            # Handle card progression differently based on reviewer state
+            if self.anki_integration.is_reviewer_active():
+                # Review mode: answer current card and let Anki handle progression
+                print("DEBUG: Answering card in review mode")
+                self.anki_integration.answer_card_and_next(1)
 
-            # Add delay to ensure Anki processes the transition
-            import time
-            time.sleep(0.3)
+                # Add delay to ensure Anki processes the transition
+                import time
+                time.sleep(0.3)
+            else:
+                # Non-review mode: just load next card from deck
+                print("DEBUG: Moving to next card in non-review mode")
+                # No need to answer card since we're not in review mode
 
             # Reset stats and load new card
             self.stats_collector.reset()
@@ -832,6 +859,55 @@ class TypingDialog(QMainWindow):
         </ul>
         """
         QMessageBox.about(self, "About", about_text)
+
+    def _open_settings(self) -> None:
+        """Open the settings panel."""
+        try:
+            # Create settings dialog with proper parameters (config, parent)
+            settings_dialog = SettingsPanel(self.config, self)
+
+            # Show as modal dialog
+            settings_dialog.exec()
+
+            # Reload configuration after settings change
+            print("DEBUG: Reloading configuration after settings change")
+            self.config = get_config()
+
+            # Update UI elements that depend on configuration
+            self._update_ui_after_settings_change()
+
+        except Exception as e:
+            print(f"DEBUG: Error opening settings: {e}")
+            QMessageBox.critical(self, "Settings Error", f"Failed to open settings: {e}")
+
+    def _update_ui_after_settings_change(self) -> None:
+        """Update UI elements after configuration changes."""
+        try:
+            # Update status bar mode label
+            if hasattr(self, 'mode_label'):
+                self.mode_label.setText(f"Mode: {self.config.behavior.input_mode.capitalize()}")
+
+            # Update window flags for always on top setting
+            current_flags = self.windowFlags()
+            if self.config.ui.always_on_top:
+                if not (current_flags & Qt.WindowType.WindowStaysOnTopHint):
+                    self.setWindowFlags(current_flags | Qt.WindowType.WindowStaysOnTopHint)
+                    self.show()  # Required to apply window flag changes
+            else:
+                if current_flags & Qt.WindowType.WindowStaysOnTopHint:
+                    self.setWindowFlags(current_flags & ~Qt.WindowType.WindowStaysOnTopHint)
+                    self.show()  # Required to apply window flag changes
+
+            # Update theme
+            self._apply_theme()
+
+            # Reload current card if available to apply new field/input processing settings
+            if self.card_data:
+                print("DEBUG: Reloading current card with new settings")
+                self._load_current_card()
+
+        except Exception as e:
+            print(f"DEBUG: Error updating UI after settings change: {e}")
 
     def _flash_error(self) -> None:
         """Flash red background for error feedback."""

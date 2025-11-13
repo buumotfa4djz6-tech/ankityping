@@ -12,7 +12,7 @@ except ImportError:
     QMenu = None
     QKeySequence = None
 
-from .ui.config_dialog import ConfigDialog
+from .ui.components.settings_panel import SettingsPanel
 from .ui.typing_dialog import TypingDialog
 
 
@@ -26,15 +26,31 @@ def open_typing_practice() -> None:
         print("AnkiTyping: Attempting to open typing practice dialog...")
         from .anki_integration import AnkiIntegration
         from .config import get_config
+        from .utils import get_deck_manager
 
         config = get_config()
         anki_integration = AnkiIntegration(config)
+        deck_manager = get_deck_manager()
 
-        # Test reviewer status
+        # Check if reviewer is active
         if anki_integration.is_reviewer_active():
-            print("AnkiTyping: Reviewer is active, opening dialog...")
+            print("AnkiTyping: Reviewer is active, opening dialog with current card...")
         else:
-            print("AnkiTyping: Reviewer is not active, will show warning...")
+            print("AnkiTyping: Reviewer is not active, attempting to load last-used deck...")
+
+            # Try to get the last used deck
+            last_deck = deck_manager.get_last_used_deck()
+            if last_deck:
+                print(f"AnkiTyping: Found last-used deck: {last_deck.deck_name}")
+                # Switch to the last-used deck
+                try:
+                    # Anki deck selection
+                    mw.col.decks.select(last_deck.deck_id)
+                    print(f"AnkiTyping: Switched to deck: {last_deck.deck_name}")
+                except Exception as deck_error:
+                    print(f"AnkiTyping: Failed to switch to deck: {deck_error}")
+            else:
+                print("AnkiTyping: No last-used deck found, using current deck")
 
         dialog = TypingDialog(mw)
         dialog.show()
@@ -56,7 +72,9 @@ def open_settings() -> None:
         return
 
     try:
-        dialog = ConfigDialog(mw)
+        from .config import get_config
+        config = get_config()
+        dialog = SettingsPanel(config, mw)
         dialog.exec()
     except Exception as e:
         # Show error message
