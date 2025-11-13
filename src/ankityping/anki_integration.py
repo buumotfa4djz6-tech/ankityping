@@ -78,7 +78,7 @@ class AnkiIntegration:
             prompt=prompt or "",
             target=target or "",
             audio=audio,
-            note_type=note.model()["name"]
+            note_type=(note.note_type()["name"] if hasattr(note, 'note_type') else note.model()["name"])
         )
 
     def _get_field_value(self, note: Note, field_name: str) -> Optional[str]:
@@ -93,8 +93,11 @@ class AnkiIntegration:
                 if value is not None:
                     return str(value)
 
-            # Method 2: Try to get field index from model (traditional method)
-            model = note.model()
+            # Method 2: Try to get field index from note_type (traditional method)
+            if hasattr(note, 'note_type'):
+                model = note.note_type()
+            else:
+                model = note.model()  # Fallback for older versions
             flds = model.get("flds", [])
 
             field_index = None
@@ -119,9 +122,13 @@ class AnkiIntegration:
             if field_index is not None and field_index < len(note.fields):
                 return note.fields[field_index]
 
-            # Method 3: Fallback - try to find field by index in note.model()['flds'] with different approach
-            if hasattr(note, 'model') and 'flds' in note.model():
-                for i, field_info in enumerate(note.model()['flds']):
+            # Method 3: Fallback - try to find field by index in note_type()['flds'] with different approach
+            if hasattr(note, 'note_type'):
+                note_model = note.note_type()
+            else:
+                note_model = note.model()
+            if 'flds' in note_model:
+                for i, field_info in enumerate(note_model['flds']):
                     if isinstance(field_info, dict):
                         field_name_from_model = field_info.get('name', field_info.get('fldName', ''))
                         if field_name_from_model.lower() == field_name.lower():
@@ -158,29 +165,241 @@ class AnkiIntegration:
             print(f"Failed to submit answer: {e}")
 
     def answer_card_and_next(self, rating: int) -> None:
-        """Submit answer and immediately move to next card."""
+        """Submit answer using the correct Anki API flow."""
+        print(f"DEBUG: answer_card_and_next called with rating {rating}")
+
         if not mw.reviewer.card:
+            print("DEBUG: No current card in reviewer")
             return
 
         try:
             # Get current card before answering
             current_card = mw.reviewer.card
+            print(f"DEBUG: Submitting current card ID: {getattr(current_card, 'id', 'unknown')} with rating {rating}")
 
-            # Submit answer with rating
-            mw.reviewer._answerCard(rating)
+            # The key insight: In Anki 25.x, we need to use the reviewer's public API
+            # _answerCard is internal and might not properly trigger the full flow
+            try:
+                print("DEBUG: Using Anki 25.x correct API flow")
 
-            # Ensure we move to next card
-            if mw.reviewer.card == current_card:
-                # Force next card if still on the same card
-                mw.reviewer.nextCard()
+                # Method: Use reviewer's answerCard (not _answerCard) if available
+                if hasattr(mw.reviewer, 'answerCard'):
+                    print("DEBUG: Found reviewer.answerCard method")
+                    mw.reviewer.answerCard(rating)
+                elif hasattr(mw.reviewer, '_answerCard'):
+                    print("DEBUG: Using reviewer._answerCard method")
+                    mw.reviewer._answerCard(rating)
+                else:
+                    print("DEBUG: No answerCard method found, trying collection scheduler")
+                    # Fallback to collection scheduler
+                    if hasattr(mw, 'col') and mw.col and hasattr(mw.col, 'sched'):
+                        mw.col.sched.answerCard(current_card, rating)
+                    else:
+                        raise Exception("No valid answerCard method found")
+
+                print("DEBUG: Answer submitted successfully")
+
+                # Now ensure the reviewer moves to next card
+                import time
+                time.sleep(0.1)
+
+                # Check if Anki automatically moved to next card
+                new_card = mw.reviewer.card
+                if new_card and new_card != current_card:
+                    print(f"DEBUG: SUCCESS - Auto-transitioned to card ID: {getattr(new_card, 'id', 'unknown')}")
+                    return
+
+                # If not, explicitly call nextCard
+                print("DEBUG: Auto-transition didn't happen, calling nextCard()")
+                if hasattr(mw.reviewer, 'nextCard'):
+                    print("DEBUG: About to call mw.reviewer.nextCard()")
+                    mw.reviewer.nextCard()
+                    print("DEBUG: nextCard() call completed")
+                    time.sleep(0.2)  # Give more time for transition
+
+                    # Check final result with more robust comparison
+                    final_card = mw.reviewer.card
+                    if final_card:
+                        final_id = getattr(final_card, 'id', None)
+                        current_id = getattr(current_card, 'id', None)
+                        print(f"DEBUG: Card comparison - Before: {current_id}, After: {final_id}")
+
+                        if final_id and final_id != current_id:
+                            print(f"DEBUG: SUCCESS - Forced transition to card ID: {final_id}")
+                            return
+                        else:
+                            print(f"DEBUG: Still on same card after nextCard() - ID: {final_id}")
+
+                            # Try additional steps that might be needed
+                            print("DEBUG: Trying additional refresh steps")
+                            try:
+                                # Force UI refresh
+                                if hasattr(mw.reviewer, 'refresh_if_needed'):
+                                    mw.reviewer.refresh_if_needed()
+                                    time.sleep(0.1)
+
+                                # Try calling nextCard again after refresh
+                                mw.reviewer.nextCard()
+                                time.sleep(0.2)
+
+                                # Check again
+                                after_refresh_card = mw.reviewer.card
+                                after_refresh_id = getattr(after_refresh_card, 'id', None)
+                                print(f"DEBUG: After refresh - Before: {current_id}, After: {after_refresh_id}")
+
+                                if after_refresh_id and after_refresh_id != current_id:
+                                    print(f"DEBUG: SUCCESS - Refresh+nextCard worked, card ID: {after_refresh_id}")
+                                    return
+                                else:
+                                    print("DEBUG: Even refresh+nextCard didn't work")
+
+                            except Exception as refresh_error:
+                                print(f"DEBUG: Refresh attempt failed: {refresh_error}")
+                    else:
+                        print("DEBUG: No card after nextCard() call")
+
+            except Exception as api_error:
+                print(f"DEBUG: API method failed: {api_error}")
+
+            # Alternative method: Try to simulate the complete user interaction flow
+            print("DEBUG: Trying to simulate complete user interaction flow")
+            try:
+                # Simulate what happens when user answers and clicks "Show Answer" then ease button
+                from aqt.reviewer import Reviewer
+
+                # Step 1: Ensure the answer is shown (in case it's still in question state)
+                if hasattr(mw.reviewer, '_showAnswer'):
+                    print("DEBUG: Step 1 - Calling _showAnswer")
+                    mw.reviewer._showAnswer()
+                    time.sleep(0.1)
+
+                # Step 2: Answer the card properly
+                ease_rating = rating  # Anki uses ease ratings 1-4 (Again=1, Hard=2, Good=3, Easy=4)
+                if hasattr(mw.reviewer, '_answerCard'):
+                    print(f"DEBUG: Step 2 - Answering with ease rating: {ease_rating}")
+                    mw.reviewer._answerCard(ease_rating)
+                    time.sleep(0.2)  # Give more time for processing
+
+                    # Step 3: Check if we need to explicitly call nextCard or if it happened automatically
+                    new_card = mw.reviewer.card
+                    if new_card and new_card != current_card:
+                        print(f"DEBUG: SUCCESS - Auto transition after answer, card ID: {getattr(new_card, 'id', 'unknown')}")
+                        return
+                    else:
+                        print("DEBUG: No auto transition, calling nextCard() explicitly")
+                        mw.reviewer.nextCard()
+                        time.sleep(0.2)
+
+                        # Check final result
+                        final_card = mw.reviewer.card
+                        if final_card and final_card != current_card:
+                            print(f"DEBUG: SUCCESS - Answer + nextCard worked, card ID: {getattr(final_card, 'id', 'unknown')}")
+                            return
+                        else:
+                            print("DEBUG: Even answer + nextCard didn't work")
+
+            except Exception as sim_error:
+                print(f"DEBUG: User simulation failed: {sim_error}")
+
+            # Alternative method 2: Try using the collection's scheduler directly
+            print("DEBUG: Trying collection scheduler method")
+            try:
+                if hasattr(mw, 'col') and mw.col and hasattr(mw.col, 'sched'):
+                    sched = mw.col.sched
+
+                    # Answer using collection scheduler
+                    print(f"DEBUG: Answering via collection scheduler with rating: {rating}")
+                    sched.answerCard(current_card, rating)
+                    time.sleep(0.1)
+
+                    # Force the reviewer to update
+                    print("DEBUG: Forcing reviewer update")
+                    if hasattr(mw.reviewer, 'refresh_if_needed'):
+                        mw.reviewer.refresh_if_needed()
+
+                    # Then get next card
+                    print("DEBUG: Getting next card via reviewer")
+                    mw.reviewer.nextCard()
+                    time.sleep(0.2)
+
+                    # Check result
+                    final_card = mw.reviewer.card
+                    if final_card and final_card != current_card:
+                        print(f"DEBUG: SUCCESS - Collection scheduler method worked, card ID: {getattr(final_card, 'id', 'unknown')}")
+                        return
+                    else:
+                        print("DEBUG: Collection scheduler method also didn't work")
+
+            except Exception as sched_error:
+                print(f"DEBUG: Collection scheduler method failed: {sched_error}")
+
+            # Final diagnostic: Check if we're in a learning session or special state
+            print("DEBUG: Performing final diagnostics")
+            try:
+                # Check card state
+                if hasattr(current_card, 'queue'):
+                    print(f"DEBUG: Card queue: {current_card.queue}")
+                if hasattr(current_card, 'type'):
+                    print(f"DEBUG: Card type: {current_card.type}")
+
+                # Check reviewer state
+                if hasattr(mw.reviewer, 'state'):
+                    print(f"DEBUG: Reviewer state: {mw.reviewer.state}")
+                if hasattr(mw.reviewer, 'cardCount'):
+                    remaining = mw.reviewer.cardCount()
+                    print(f"DEBUG: Cards remaining: {remaining}")
+
+                # Check if this might be the last card
+                if hasattr(mw.reviewer, 'remainingCount'):
+                    try:
+                        remaining = mw.reviewer.remainingCount()
+                        print(f"DEBUG: Reviewer remainingCount: {remaining}")
+                        if remaining <= 0:
+                            print("DEBUG: This appears to be the last card in the session")
+                    except:
+                        pass
+
+            except Exception as diag_error:
+                print(f"DEBUG: Diagnostic failed: {diag_error}")
+
+            final_card = mw.reviewer.card
+            if final_card and final_card != current_card:
+                print(f"DEBUG: FINAL SUCCESS - Card changed to ID: {getattr(final_card, 'id', 'unknown')}")
+            else:
+                print(f"DEBUG: FINAL STATUS - Card remains: {getattr(current_card, 'id', 'unknown')}")
 
         except Exception as e:
-            print(f"Failed to answer card and move to next: {e}")
-            # Fallback: try to manually move to next card
-            try:
-                mw.reviewer.nextCard()
-            except Exception as e2:
-                print(f"Fallback also failed: {e2}")
+            print(f"ERROR: Critical failure: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def force_next_card(self) -> None:
+        """Force move to next card without answering current one."""
+        print("DEBUG: force_next_card called - forcing transition without answering")
+
+        if not mw.reviewer.card:
+            print("DEBUG: No current card in reviewer")
+            return
+
+        try:
+            current_card = mw.reviewer.card
+            print(f"DEBUG: Forcing transition from card ID: {getattr(current_card, 'id', 'unknown')}")
+
+            # Force next card
+            mw.reviewer.nextCard()
+
+            # Check result
+            import time
+            time.sleep(0.1)
+
+            new_card = mw.reviewer.card
+            if new_card and new_card != current_card:
+                print(f"DEBUG: SUCCESS - Forced transition to card ID: {getattr(new_card, 'id', 'unknown')}")
+            else:
+                print("DEBUG: No transition occurred (possibly no more cards)")
+
+        except Exception as e:
+            print(f"ERROR: Failed to force next card: {e}")
 
     def submit_answer_with_stats(self, stats: PracticeStats,
                                 stats_field: str = "TypingStats") -> None:
@@ -265,8 +484,11 @@ class AnkiIntegration:
                         if str(field_value) == str(value):
                             return i
 
-            # Method 2: Parse field structure from model
-            model = note.model()
+            # Method 2: Parse field structure from note_type
+            if hasattr(note, 'note_type'):
+                model = note.note_type()
+            else:
+                model = note.model()  # Fallback for older versions
             flds = model.get("flds", [])
 
             for i, field_info in enumerate(flds):
@@ -305,7 +527,10 @@ class AnkiIntegration:
         try:
             card = mw.reviewer.card
             note = card.note()
-            model = note.model()
+            if hasattr(note, 'note_type'):
+                model = note.note_type()
+            else:
+                model = note.model()  # Fallback for older versions
             flds = model.get("flds", [])
 
             field_names = []
@@ -346,7 +571,27 @@ class AnkiIntegration:
 
     def is_reviewer_active(self) -> bool:
         """Check if the reviewer is currently active."""
-        return mw and mw.reviewer and mw.reviewer.card is not None
+        try:
+            if not mw:
+                print("Anki mw is None")
+                return False
+            if not mw.reviewer:
+                print("Anki reviewer is None")
+                return False
+            if not mw.reviewer.card:
+                print("Anki reviewer.card is None")
+                return False
+
+            # Additional check: verify card has valid ID
+            if not hasattr(mw.reviewer.card, 'id') or not mw.reviewer.card.id:
+                print("Anki card has no valid ID")
+                return False
+
+            print(f"Reviewer is active with card ID: {mw.reviewer.card.id}")
+            return True
+        except Exception as e:
+            print(f"Error checking reviewer activity: {e}")
+            return False
 
     def get_current_field_content(self, field_name: str) -> Optional[str]:
         """Get content of a specific field from the current card."""

@@ -47,6 +47,7 @@ class TypingDialog(QMainWindow):
         self._setup_menu_bar()
         self._setup_status_bar()
         self._setup_shortcuts()
+        self._setup_card_monitor()
         self._load_current_card()
 
     def _setup_ui(self) -> None:
@@ -172,10 +173,11 @@ class TypingDialog(QMainWindow):
         # Practice menu
         practice_menu = menubar.addMenu("Practice")
 
-        pause_action = QAction("Pause/Resume", self)
-        pause_action.setShortcut(QKeySequence("Space"))
-        pause_action.triggered.connect(self._toggle_pause)
-        practice_menu.addAction(pause_action)
+        # Remove pause functionality as it conflicts with spacebar typing
+        # pause_action = QAction("Pause/Resume", self)
+        # pause_action.setShortcut(QKeySequence("Space"))
+        # pause_action.triggered.connect(self._toggle_pause)
+        # practice_menu.addAction(pause_action)
 
         restart_action = QAction("Restart Card", self)
         restart_action.setShortcut(QKeySequence("Ctrl+R"))
@@ -235,6 +237,47 @@ class TypingDialog(QMainWindow):
 
         # Ctrl+H for hint
         self.hint_button.setShortcut("Ctrl+H")
+
+    def _setup_card_monitor(self) -> None:
+        """Setup monitoring for card changes in the main Anki window."""
+        try:
+            self._last_card_id = None
+            self._card_monitor_timer = QTimer()
+            self._card_monitor_timer.timeout.connect(self._check_card_change)
+            self._card_monitor_timer.start(1000)  # Check every second
+            print("DEBUG: Card change monitor started")
+        except Exception as e:
+            print(f"DEBUG: Failed to setup card monitor: {e}")
+
+    def _check_card_change(self) -> None:
+        """Check if the card has changed in the main Anki window."""
+        try:
+            if not self.anki_integration.is_reviewer_active():
+                return
+
+            current_card_data = self.anki_integration.get_current_card_data()
+            if not current_card_data:
+                return
+
+            current_card_id = getattr(current_card_data, 'card_id', None)
+
+            # Initialize last card ID if this is the first check
+            if self._last_card_id is None:
+                self._last_card_id = current_card_id
+                return
+
+            # Check if card has changed
+            if current_card_id != self._last_card_id:
+                print(f"DEBUG: Card changed detected in main window: {self._last_card_id} -> {current_card_id}")
+                self._last_card_id = current_card_id
+
+                # Update the typing interface if we're not currently in the middle of a practice session
+                if not self.is_practice_active or not self.stats_collector.is_running():
+                    print("DEBUG: Updating typing interface with new card")
+                    self._load_current_card()
+
+        except Exception as e:
+            print(f"DEBUG: Error checking card change: {e}")
 
     def _apply_theme(self) -> None:
         """Apply the configured theme."""
@@ -322,39 +365,75 @@ class TypingDialog(QMainWindow):
     def _load_current_card(self) -> None:
         """Load data from the current Anki card."""
         try:
-            self.card_data = self.anki_integration.get_current_card_data()
-            if not self.card_data:
-                QMessageBox.warning(self, "No Card",
-                                   "No card is currently displayed. Please open a card in the Anki reviewer first.")
+            # Check if reviewer is still active and has a card
+            if not self.anki_integration.is_reviewer_active():
+                print("DEBUG: No active reviewer or no card available - closing dialog")
                 self.close()
                 return
 
-            # Initialize components
-            self.typing_engine = TypingEngine(
-                self.card_data.target,
-                self.config.behavior.input_mode
+            # Get current card data from Anki (whatever card Anki has transitioned to)
+            new_card_data = self.anki_integration.get_current_card_data()
+            if not new_card_data or not new_card_data.target.strip():
+                print("DEBUG: No card data or empty target - session might be complete")
+                self.close()
+                return
+
+            print(f"DEBUG: Loading card ID: {new_card_data.card_id}")
+
+            # Only update if card actually changed or this is the first load
+            should_update = (
+                not hasattr(self, 'card_data') or
+                not self.card_data or
+                self.card_data.card_id != new_card_data.card_id
             )
-            self.hint_manager = HintManager(self.card_data.target)
 
-            # Set up the typing display
-            self.typing_display.set_typing_engine(self.typing_engine)
+            if should_update:
+                print(f"DEBUG: Card changed or first load, updating components")
+                self.card_data = new_card_data
 
-            # Update UI
-            self.prompt_label.setText(self.card_data.prompt)
-            self.typing_display.refresh()
+                # Reset stats if this is a new card
+                if self.stats_collector.is_running():
+                    self.stats_collector.end_session()
+                self.stats_collector.reset()
+
+                # Initialize components with new card data
+                self.typing_engine = TypingEngine(
+                    self.card_data.target,
+                    self.config.behavior.input_mode
+                )
+                self.hint_manager = HintManager(self.card_data.target)
+
+                # Set up the typing display
+                self.typing_display.set_typing_engine(self.typing_engine)
+
+                # Update UI
+                self.prompt_label.setText(self.card_data.prompt)
+                self.typing_display.refresh()
+
+                # Update status bar
+                self.stats_label.setText("Ready to start typing...")
+
+                # Play audio if configured
+                if self.config.behavior.auto_play_audio and self.card_data.audio:
+                    self.anki_integration.play_audio(self.card_data.audio)
+
+                # Update monitor's last card ID
+                if hasattr(self, '_last_card_id'):
+                    self._last_card_id = self.card_data.card_id
+            else:
+                print(f"DEBUG: Same card, skipping update")
 
             # Auto focus if enabled
             if self.config.behavior.auto_focus:
                 QTimer.singleShot(100, self._focus_typing_area)
 
-            # Play audio if configured
-            if self.config.behavior.auto_play_audio and self.card_data.audio:
-                self.anki_integration.play_audio(self.card_data.audio)
-
             # Mark practice as active
             self.is_practice_active = True
 
         except Exception as e:
+            print(f"ERROR: Failed to load card: {e}")
+            import traceback
+            traceback.print_exc()
             QMessageBox.critical(self, "Error", f"Failed to load card: {e}")
             self.close()
 
@@ -447,17 +526,30 @@ class TypingDialog(QMainWindow):
 
     def _finish_practice(self, success: bool = True) -> None:
         """Finish the practice session and submit to Anki."""
+        print("DEBUG: _finish_practice called")
+
+        # Prevent duplicate calls
+        if hasattr(self, '_finishing') and self._finishing:
+            print("DEBUG: Already finishing, preventing duplicate call")
+            return
+        self._finishing = True
+
         if not self.stats_collector.is_running():
+            print("DEBUG: Stats collector not running, returning")
+            self._finishing = False
             return
 
         # End statistics collection
         self.stats_collector.end_session()
+        print("DEBUG: Stats collection ended")
 
         # Calculate final stats
         time_seconds = self.stats_collector.get_elapsed_time()
         error_count = self.stats_collector.get_error_count()
         hint_count = self.stats_collector.get_hint_count()
         score = self.stats_collector.calculate_final_score()
+
+        print(f"DEBUG: Stats - Time: {time_seconds}s, Errors: {error_count}, Score: {score}")
 
         # Create practice stats
         practice_stats = PracticeStats(
@@ -469,6 +561,7 @@ class TypingDialog(QMainWindow):
 
         # Calculate rating
         rating = self.anki_integration._calculate_rating(practice_stats)
+        print(f"DEBUG: Calculated rating: {rating}")
 
         # Show completion message if enabled
         if self.config.behavior.show_completion_popup:
@@ -484,52 +577,118 @@ class TypingDialog(QMainWindow):
                                        "Don't worry! Keep practicing and you'll improve.")
 
         # Submit to Anki with automatic card progression
+        print("DEBUG: Starting Anki card submission...")
         try:
+            # First check if reviewer is still active
+            if not self.anki_integration.is_reviewer_active():
+                print("DEBUG: Reviewer is not active, cannot submit card")
+                QMessageBox.warning(self, "Warning", "Cannot submit card - no active reviewer")
+                self._finishing = False
+                return
+
+            # Submit the card
+            print("DEBUG: Calling answer_card_and_next...")
             self.anki_integration.answer_card_and_next(rating)
+            print("DEBUG: answer_card_and_next completed")
+
+            # Write stats to card
+            print("DEBUG: Writing stats to card...")
             self.anki_integration._write_stats_to_card(practice_stats, "TypingStats")
+            print("DEBUG: Stats written to card")
+
         except Exception as e:
-            print(f"Warning: Could not submit to Anki: {e}")
-            # Don't show error dialog to avoid disrupting flow
+            print(f"ERROR: Could not submit to Anki: {e}")
+            import traceback
+            traceback.print_exc()
+            QMessageBox.warning(self, "Warning", f"Could not submit card to Anki: {e}")
 
         # Emit completion signal
         self.card_completed.emit(rating)
+        print("DEBUG: Completion signal emitted")
 
         # Load next card immediately
+        print("DEBUG: Loading next card...")
         self._load_next_card()
+        print("DEBUG: _finish_practice completed")
+        self._finishing = False
 
     def _load_next_card(self) -> None:
-        """Load the next card without additional rating."""
+        """Load the next card after Anki has handled the transition."""
+        print("DEBUG: _load_next_card called")
         try:
-            # Reset stats and load new card
+            # Add longer delay to ensure Anki has fully processed the card transition
+            import time
+            time.sleep(0.5)
+
+            # Reset stats before loading new card
+            print("DEBUG: Resetting stats collector")
             self.stats_collector.reset()
-            self._load_current_card()
+
+            # Multiple attempts to get the correct card data
+            max_attempts = 3
+            for attempt in range(max_attempts):
+                print(f"DEBUG: Loading new card from Anki (attempt {attempt + 1}/{max_attempts})")
+
+                # Store previous card ID for comparison
+                previous_card_id = getattr(self.card_data, 'card_id', None) if hasattr(self, 'card_data') else None
+
+                # Load current card data
+                self._load_current_card()
+
+                # Check if we got a different card
+                current_card_id = getattr(self.card_data, 'card_id', None) if hasattr(self, 'card_data') else None
+
+                if current_card_id and current_card_id != previous_card_id:
+                    print(f"DEBUG: SUCCESS - Got new card ID: {current_card_id} (was: {previous_card_id})")
+                    break
+                else:
+                    print(f"DEBUG: Still same card ID: {current_card_id}, waiting and retrying...")
+                    if attempt < max_attempts - 1:
+                        time.sleep(0.3)
+
+            print("DEBUG: _load_current_card completed")
+
+            # Check if we have a valid new card
+            if hasattr(self, 'card_data') and self.card_data and self.card_data.target.strip():
+                print("DEBUG: New card loaded successfully")
+                # Practice will be marked as active in _load_current_card
+            else:
+                print("DEBUG: No valid new card available - session might be complete")
 
         except Exception as e:
-            print(f"Warning: Failed to load next card: {e}")
-            # Try to continue with current session
+            print(f"ERROR: Failed to load next card: {e}")
+            import traceback
+            traceback.print_exc()
             QMessageBox.warning(self, "Warning", f"Could not load next card: {e}")
+            # Mark practice as inactive to prevent loops
+            self.is_practice_active = False
 
     def _next_card(self) -> None:
         """Skip to next card with 'Again' rating."""
         try:
-            # Answer current card with 'Again' rating
+            # End current session if running
+            if self.stats_collector.is_running():
+                self.stats_collector.end_session()
+
+            # Answer current card with 'Again' rating (Anki will auto-transition)
             self.anki_integration.answer_card_and_next(1)
+
+            # Add delay to ensure Anki processes the transition
+            import time
+            time.sleep(0.3)
 
             # Reset stats and load new card
             self.stats_collector.reset()
             self._load_current_card()
 
         except Exception as e:
+            print(f"Failed to skip to next card: {e}")
             QMessageBox.warning(self, "Error", f"Failed to load next card: {e}")
 
     def _toggle_pause(self) -> None:
-        """Toggle pause state."""
-        if self.stats_collector.is_running():
-            self.stats_collector.end_session()
-            self.stats_label.setText("Paused - Press Space to resume")
-        else:
-            self.stats_collector.start_session(self.card_data.target if self.card_data else "")
-            self._focus_typing_area()
+        """Toggle pause state - DISABLED to avoid spacebar conflicts."""
+        # This method is disabled to prevent conflicts with spacebar typing
+        pass
 
     def _change_input_mode(self, mode: str) -> None:
         """Change the input mode."""
@@ -634,6 +793,9 @@ class TypingDialog(QMainWindow):
 
         # Check if complete
         if result.is_complete:
+            print(f"DEBUG: Typing complete detected, calling _finish_practice")
+            # Mark practice as inactive to prevent additional key processing
+            self.is_practice_active = False
             self._finish_practice(success=True)
         else:
             super().keyPressEvent(event)
@@ -656,6 +818,11 @@ class TypingDialog(QMainWindow):
 
     def closeEvent(self, event) -> None:
         """Handle window close event."""
+        # Stop card monitor
+        if hasattr(self, '_card_monitor_timer'):
+            self._card_monitor_timer.stop()
+            print("DEBUG: Card change monitor stopped")
+
         if self.stats_collector.is_running():
             reply = QMessageBox.question(
                 self, "Close Without Finishing?",

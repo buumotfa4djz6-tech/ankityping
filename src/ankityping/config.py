@@ -31,7 +31,7 @@ class BehaviorConfig:
     show_errors: bool = True
     input_mode: str = "progressive"  # "progressive" or "accompanying"
     auto_focus: bool = True
-    show_completion_popup: bool = False
+    show_completion_popup: bool = True  # Temporarily enable for debugging
 
 
 @dataclass

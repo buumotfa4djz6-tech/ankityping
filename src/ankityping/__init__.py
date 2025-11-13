@@ -22,9 +22,24 @@ def open_typing_practice() -> None:
         return
 
     try:
+        print("AnkiTyping: Attempting to open typing practice dialog...")
+        from .anki_integration import AnkiIntegration
+        from .config import get_config
+
+        config = get_config()
+        anki_integration = AnkiIntegration(config)
+
+        # Test reviewer status
+        if anki_integration.is_reviewer_active():
+            print("AnkiTyping: Reviewer is active, opening dialog...")
+        else:
+            print("AnkiTyping: Reviewer is not active, will show warning...")
+
         dialog = TypingDialog(mw)
         dialog.show()
+        print("AnkiTyping: Dialog opened successfully")
     except Exception as e:
+        print(f"AnkiTyping: Error opening dialog: {e}")
         # Show error message
         from aqt.qt import QMessageBox
         QMessageBox.critical(
