@@ -157,6 +157,31 @@ class AnkiIntegration:
         except Exception as e:
             print(f"Failed to submit answer: {e}")
 
+    def answer_card_and_next(self, rating: int) -> None:
+        """Submit answer and immediately move to next card."""
+        if not mw.reviewer.card:
+            return
+
+        try:
+            # Get current card before answering
+            current_card = mw.reviewer.card
+
+            # Submit answer with rating
+            mw.reviewer._answerCard(rating)
+
+            # Ensure we move to next card
+            if mw.reviewer.card == current_card:
+                # Force next card if still on the same card
+                mw.reviewer.nextCard()
+
+        except Exception as e:
+            print(f"Failed to answer card and move to next: {e}")
+            # Fallback: try to manually move to next card
+            try:
+                mw.reviewer.nextCard()
+            except Exception as e2:
+                print(f"Fallback also failed: {e2}")
+
     def submit_answer_with_stats(self, stats: PracticeStats,
                                 stats_field: str = "TypingStats") -> None:
         """Submit answer and write stats to card field."""

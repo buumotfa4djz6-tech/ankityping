@@ -8,7 +8,7 @@ import sys
 from PyQt6.QtWidgets import (
     QMainWindow, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit,
     QPushButton, QMessageBox, QWidget, QMenuBar, QMenu,
-    QApplication, QStatusBar, QSplitter, QFrame
+    QApplication, QStatusBar, QSplitter, QFrame, QScrollArea
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QSize
 from PyQt6.QtGui import QFont, QPalette, QColor, QAction, QKeySequence
@@ -19,6 +19,7 @@ from ..config import get_config, Config
 from ..core.typing_engine import TypingEngine, CharacterState
 from ..core.stats import StatsCollector
 from ..core.hint import HintManager, HintLevel
+from .components.typing_display import TypingDisplayWidget
 
 
 class TypingDialog(QMainWindow):
@@ -91,15 +92,18 @@ class TypingDialog(QMainWindow):
         typing_layout = QVBoxLayout()
         typing_frame.setLayout(typing_layout)
 
-        self.typing_display = QTextEdit()
-        self.typing_display.setReadOnly(True)
-        self.typing_display.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        typing_font = QFont()
-        typing_font.setPointSize(18)
-        typing_font.setFamily("Consolas, monospace")
-        self.typing_display.setFont(typing_font)
+        # Create scroll area for long sentences
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll_area.setMinimumHeight(150)
+
+        # Use the new TypingDisplayWidget
+        self.typing_display = TypingDisplayWidget()
         self.typing_display.setMinimumHeight(120)
-        typing_layout.addWidget(self.typing_display)
+        scroll_area.setWidget(self.typing_display)
+        typing_layout.addWidget(scroll_area)
 
         # Hint label
         self.hint_label = QLabel("")
@@ -240,7 +244,7 @@ class TypingDialog(QMainWindow):
                     background-color: #2b2b2b;
                     color: #ffffff;
                 }
-                QTextEdit {
+                QTextEdit, TypingDisplayWidget {
                     background-color: #1e1e1e;
                     color: #ffffff;
                     border: 2px solid #404040;
@@ -280,7 +284,7 @@ class TypingDialog(QMainWindow):
                     background-color: #ffffff;
                     color: #000000;
                 }
-                QTextEdit {
+                QTextEdit, TypingDisplayWidget {
                     background-color: #f8f8f8;
                     color: #000000;
                     border: 2px solid #cccccc;
@@ -332,9 +336,12 @@ class TypingDialog(QMainWindow):
             )
             self.hint_manager = HintManager(self.card_data.target)
 
+            # Set up the typing display
+            self.typing_display.set_typing_engine(self.typing_engine)
+
             # Update UI
             self.prompt_label.setText(self.card_data.prompt)
-            self._update_typing_display()
+            self.typing_display.refresh()
 
             # Auto focus if enabled
             if self.config.behavior.auto_focus:
@@ -359,11 +366,8 @@ class TypingDialog(QMainWindow):
 
     def _update_typing_display(self) -> None:
         """Update the typing display with current engine state."""
-        if not self.typing_engine:
-            return
-
-        formatted_text = self.typing_engine.get_formatted_text()
-        self.typing_display.setHtml(f"<div style='font-size: 18px; line-height: 1.5;'>{formatted_text}</div>")
+        if self.typing_display and self.typing_engine:
+            self.typing_display.refresh()
 
     def _on_stats_update(self) -> None:
         """Handle statistics update."""
@@ -479,23 +483,37 @@ class TypingDialog(QMainWindow):
                 QMessageBox.information(self, "Practice Given Up",
                                        "Don't worry! Keep practicing and you'll improve.")
 
-        # Submit to Anki
+        # Submit to Anki with automatic card progression
         try:
-            self.anki_integration.submit_answer_with_stats(practice_stats)
+            self.anki_integration.answer_card_and_next(rating)
+            self.anki_integration._write_stats_to_card(practice_stats, "TypingStats")
         except Exception as e:
-            QMessageBox.warning(self, "Warning", f"Could not submit to Anki: {e}")
+            print(f"Warning: Could not submit to Anki: {e}")
+            # Don't show error dialog to avoid disrupting flow
 
         # Emit completion signal
         self.card_completed.emit(rating)
 
-        # Load next card
-        self._next_card()
+        # Load next card immediately
+        self._load_next_card()
+
+    def _load_next_card(self) -> None:
+        """Load the next card without additional rating."""
+        try:
+            # Reset stats and load new card
+            self.stats_collector.reset()
+            self._load_current_card()
+
+        except Exception as e:
+            print(f"Warning: Failed to load next card: {e}")
+            # Try to continue with current session
+            QMessageBox.warning(self, "Warning", f"Could not load next card: {e}")
 
     def _next_card(self) -> None:
-        """Load the next card."""
+        """Skip to next card with 'Again' rating."""
         try:
-            # Move to next card in Anki
-            self.anki_integration.submit_answer(1)  # Use "Again" rating as default
+            # Answer current card with 'Again' rating
+            self.anki_integration.answer_card_and_next(1)
 
             # Reset stats and load new card
             self.stats_collector.reset()
@@ -517,6 +535,7 @@ class TypingDialog(QMainWindow):
         """Change the input mode."""
         if self.typing_engine and self.typing_engine.input_mode != mode:
             self.typing_engine.input_mode = mode
+            self.typing_engine._reset_state()  # Reset state to apply new mode
             self._update_typing_display()
             self.mode_label.setText(f"Mode: {mode.capitalize()}")
 
@@ -570,12 +589,13 @@ class TypingDialog(QMainWindow):
 
     def _flash_error(self) -> None:
         """Flash red background for error feedback."""
-        self.typing_display.setStyleSheet("background-color: #ffebee;")  # Light red
-        self._error_flash_timer.start(200)  # Flash for 200ms
+        if self.typing_display:
+            self.typing_display.flash_error()
 
     def _clear_error_flash(self) -> None:
         """Clear error flash background."""
-        self._apply_theme()  # Reapply normal theme
+        # TypingDisplayWidget handles its own flash clearing
+        pass
 
     def keyPressEvent(self, event) -> None:
         """Handle key press events."""
