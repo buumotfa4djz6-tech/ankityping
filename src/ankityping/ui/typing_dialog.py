@@ -294,9 +294,26 @@ class TypingDialog(QMainWindow):
 
             # Reinitialize all components with new card data
             print(f"DEBUG: Creating new typing engine for: {self.card_data.target[:50]}...")
+
+            # Create input processing configuration
+            from ..utils import InputProcessingConfig
+            input_config = InputProcessingConfig(
+                handle_punctuation=self.config.input_processing.handle_punctuation,
+                auto_punctuation=self.config.input_processing.auto_punctuation,
+                ignore_punctuation_errors=self.config.input_processing.ignore_punctuation_errors,
+                handle_whitespace=self.config.input_processing.handle_whitespace,
+                ignore_extra_spaces=self.config.input_processing.ignore_extra_spaces,
+                auto_correct_spaces=self.config.input_processing.auto_correct_spaces,
+                case_sensitive=self.config.input_processing.case_sensitive,
+                auto_correct_case=self.config.input_processing.auto_correct_case,
+                handle_diacritics=self.config.input_processing.handle_diacritics,
+                ignore_diacritic_errors=self.config.input_processing.ignore_diacritic_errors,
+            )
+
             self.typing_engine = TypingEngine(
                 self.card_data.target,
-                self.config.behavior.input_mode
+                self.config.behavior.input_mode,
+                input_config
             )
             self.hint_manager = HintManager(self.card_data.target)
 
@@ -442,10 +459,26 @@ class TypingDialog(QMainWindow):
                 self.stats_collector.end_session()
             self.stats_collector.reset()
 
+            # Create input processing configuration
+            from ..utils import InputProcessingConfig
+            input_config = InputProcessingConfig(
+                handle_punctuation=self.config.input_processing.handle_punctuation,
+                auto_punctuation=self.config.input_processing.auto_punctuation,
+                ignore_punctuation_errors=self.config.input_processing.ignore_punctuation_errors,
+                handle_whitespace=self.config.input_processing.handle_whitespace,
+                ignore_extra_spaces=self.config.input_processing.ignore_extra_spaces,
+                auto_correct_spaces=self.config.input_processing.auto_correct_spaces,
+                case_sensitive=self.config.input_processing.case_sensitive,
+                auto_correct_case=self.config.input_processing.auto_correct_case,
+                handle_diacritics=self.config.input_processing.handle_diacritics,
+                ignore_diacritic_errors=self.config.input_processing.ignore_diacritic_errors,
+            )
+
             # Initialize components with new card data
             self.typing_engine = TypingEngine(
                 self.card_data.target,
-                self.config.behavior.input_mode
+                self.config.behavior.input_mode,
+                input_config
             )
             self.hint_manager = HintManager(self.card_data.target)
 

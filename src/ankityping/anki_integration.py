@@ -20,6 +20,7 @@ except ImportError:
     Collection = None
 
 from .config import Config, FieldMapping
+from .utils import FieldProcessor, ProcessingConfig
 
 
 @dataclass
@@ -48,6 +49,17 @@ class AnkiIntegration:
     def __init__(self, config: Config):
         self.config = config
         self._ensure_anki_available()
+        # Initialize field processor
+        field_proc_config = ProcessingConfig(
+            remove_html_tags=config.field_processing.remove_html_tags,
+            preserve_line_breaks=config.field_processing.preserve_line_breaks,
+            handle_html_entities=config.field_processing.handle_html_entities,
+            normalize_whitespace=config.field_processing.normalize_whitespace,
+            remove_extra_spaces=config.field_processing.remove_extra_spaces,
+            keep_important_formatting=config.field_processing.keep_important_formatting,
+            replace_html_formatting=config.field_processing.replace_html_formatting,
+        )
+        self.field_processor = FieldProcessor(field_proc_config)
 
     def _ensure_anki_available(self) -> None:
         """Ensure Anki is available."""
@@ -64,9 +76,14 @@ class AnkiIntegration:
         field_mapping = self.config.field_mapping
 
         # Extract field values
-        prompt = self._get_field_value(note, field_mapping.prompt)
-        target = self._get_field_value(note, field_mapping.target)
-        audio = self._get_field_value(note, field_mapping.audio) if field_mapping.audio else None
+        raw_prompt = self._get_field_value(note, field_mapping.prompt)
+        raw_target = self._get_field_value(note, field_mapping.target)
+        raw_audio = self._get_field_value(note, field_mapping.audio) if field_mapping.audio else None
+
+        # Process field content to remove HTML tags and clean text
+        prompt = self.field_processor.process_field_content(raw_prompt) if raw_prompt else ""
+        target = self.field_processor.process_field_content(raw_target) if raw_target else ""
+        audio = raw_audio  # Audio field doesn't need processing
 
         # Clean audio field (remove sound tags if present)
         if audio and audio.startswith("[sound:"):

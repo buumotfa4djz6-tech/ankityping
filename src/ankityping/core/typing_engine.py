@@ -6,6 +6,14 @@ from typing import List, Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
 
+# Import input processor if available
+try:
+    from ..utils import InputProcessor, InputProcessingConfig
+except ImportError:
+    # Fallback for testing
+    InputProcessor = None
+    InputProcessingConfig = None
+
 
 class CharacterState(Enum):
     """State of a character in the typing exercise."""
@@ -37,13 +45,20 @@ class TypingResult:
 class TypingEngine:
     """Core engine for managing typing practice."""
 
-    def __init__(self, target_text: str, input_mode: str = "progressive"):
+    def __init__(self, target_text: str, input_mode: str = "progressive", input_config=None):
         self.target_text = target_text
         self.input_mode = input_mode  # "progressive" or "accompanying"
         self.typed_text = ""
         self.current_position = 0
         self.error_count = 0
         self.is_complete = False
+
+        # Initialize input processor if available
+        if InputProcessor and input_config:
+            self.input_processor = InputProcessor(input_config)
+        else:
+            self.input_processor = None
+
         self._reset_state()
 
     def _reset_state(self) -> None:
@@ -85,7 +100,27 @@ class TypingEngine:
             return self._create_result(is_correct=False, is_complete=False, error_occurred=False)
 
         target_char = self.target_text[self.current_position]
-        is_correct = input_char == target_char
+
+        # Process input through input processor if available
+        processed_input = input_char
+        should_accept = True
+        processing_message = ""
+
+        if self.input_processor:
+            processed_input, should_accept, processing_message = self.input_processor.process_input(
+                input_char, target_char, self.current_position
+            )
+            if processing_message:
+                print(f"DEBUG: Input processor: {processing_message}")
+
+        # Use processed input for comparison
+        is_correct = processed_input == target_char
+
+        # If input processor says we should not accept (e.g., auto-punctuation added different char)
+        # but the original input was correct for the target, we accept the original
+        if not should_accept and input_char == target_char:
+            is_correct = True
+            processed_input = input_char
 
         if is_correct:
             return self._handle_correct_input(input_char)

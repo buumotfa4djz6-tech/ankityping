@@ -43,11 +43,40 @@ class FieldMapping:
 
 
 @dataclass
+class FieldProcessingConfig:
+    """Field content processing configuration."""
+    remove_html_tags: bool = True
+    preserve_line_breaks: bool = True
+    handle_html_entities: bool = True
+    normalize_whitespace: bool = True
+    remove_extra_spaces: bool = True
+    keep_important_formatting: bool = False
+    replace_html_formatting: bool = True
+
+
+@dataclass
+class InputProcessingConfig:
+    """Input processing configuration."""
+    handle_punctuation: bool = True
+    auto_punctuation: bool = True
+    ignore_punctuation_errors: bool = False
+    handle_whitespace: bool = True
+    ignore_extra_spaces: bool = True
+    auto_correct_spaces: bool = True
+    case_sensitive: bool = True
+    auto_correct_case: bool = False
+    handle_diacritics: bool = True
+    ignore_diacritic_errors: bool = False
+
+
+@dataclass
 class Config:
     """Main configuration class."""
     ui: UIConfig = field(default_factory=UIConfig)
     behavior: BehaviorConfig = field(default_factory=BehaviorConfig)
     field_mapping: FieldMapping = field(default_factory=FieldMapping)
+    field_processing: FieldProcessingConfig = field(default_factory=FieldProcessingConfig)
+    input_processing: InputProcessingConfig = field(default_factory=InputProcessingConfig)
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> Config:
@@ -71,6 +100,31 @@ class Config:
             config.behavior.input_mode = behavior_data.get("inputMode", config.behavior.input_mode)
             config.behavior.auto_focus = behavior_data.get("autoFocus", config.behavior.auto_focus)
             config.behavior.show_completion_popup = behavior_data.get("showCompletionPopup", config.behavior.show_completion_popup)
+
+        # Field processing settings
+        if "fieldProcessing" in data:
+            field_proc_data = data["fieldProcessing"]
+            config.field_processing.remove_html_tags = field_proc_data.get("removeHtmlTags", config.field_processing.remove_html_tags)
+            config.field_processing.preserve_line_breaks = field_proc_data.get("preserveLineBreaks", config.field_processing.preserve_line_breaks)
+            config.field_processing.handle_html_entities = field_proc_data.get("handleHtmlEntities", config.field_processing.handle_html_entities)
+            config.field_processing.normalize_whitespace = field_proc_data.get("normalizeWhitespace", config.field_processing.normalize_whitespace)
+            config.field_processing.remove_extra_spaces = field_proc_data.get("removeExtraSpaces", config.field_processing.remove_extra_spaces)
+            config.field_processing.keep_important_formatting = field_proc_data.get("keepImportantFormatting", config.field_processing.keep_important_formatting)
+            config.field_processing.replace_html_formatting = field_proc_data.get("replaceHtmlFormatting", config.field_processing.replace_html_formatting)
+
+        # Input processing settings
+        if "inputProcessing" in data:
+            input_proc_data = data["inputProcessing"]
+            config.input_processing.handle_punctuation = input_proc_data.get("handlePunctuation", config.input_processing.handle_punctuation)
+            config.input_processing.auto_punctuation = input_proc_data.get("autoPunctuation", config.input_processing.auto_punctuation)
+            config.input_processing.ignore_punctuation_errors = input_proc_data.get("ignorePunctuationErrors", config.input_processing.ignore_punctuation_errors)
+            config.input_processing.handle_whitespace = input_proc_data.get("handleWhitespace", config.input_processing.handle_whitespace)
+            config.input_processing.ignore_extra_spaces = input_proc_data.get("ignoreExtraSpaces", config.input_processing.ignore_extra_spaces)
+            config.input_processing.auto_correct_spaces = input_proc_data.get("autoCorrectSpaces", config.input_processing.auto_correct_spaces)
+            config.input_processing.case_sensitive = input_proc_data.get("caseSensitive", config.input_processing.case_sensitive)
+            config.input_processing.auto_correct_case = input_proc_data.get("autoCorrectCase", config.input_processing.auto_correct_case)
+            config.input_processing.handle_diacritics = input_proc_data.get("handleDiacritics", config.input_processing.handle_diacritics)
+            config.input_processing.ignore_diacritic_errors = input_proc_data.get("ignoreDiacriticErrors", config.input_processing.ignore_diacritic_errors)
 
         if "fieldMapping" in data:
             field_data = data["fieldMapping"]
@@ -98,6 +152,27 @@ class Config:
                 "inputMode": self.behavior.input_mode,
                 "autoFocus": self.behavior.auto_focus,
                 "showCompletionPopup": self.behavior.show_completion_popup,
+            },
+            "fieldProcessing": {
+                "removeHtmlTags": self.field_processing.remove_html_tags,
+                "preserveLineBreaks": self.field_processing.preserve_line_breaks,
+                "handleHtmlEntities": self.field_processing.handle_html_entities,
+                "normalizeWhitespace": self.field_processing.normalize_whitespace,
+                "removeExtraSpaces": self.field_processing.remove_extra_spaces,
+                "keepImportantFormatting": self.field_processing.keep_important_formatting,
+                "replaceHtmlFormatting": self.field_processing.replace_html_formatting,
+            },
+            "inputProcessing": {
+                "handlePunctuation": self.input_processing.handle_punctuation,
+                "autoPunctuation": self.input_processing.auto_punctuation,
+                "ignorePunctuationErrors": self.input_processing.ignore_punctuation_errors,
+                "handleWhitespace": self.input_processing.handle_whitespace,
+                "ignoreExtraSpaces": self.input_processing.ignore_extra_spaces,
+                "autoCorrectSpaces": self.input_processing.auto_correct_spaces,
+                "caseSensitive": self.input_processing.case_sensitive,
+                "autoCorrectCase": self.input_processing.auto_correct_case,
+                "handleDiacritics": self.input_processing.handle_diacritics,
+                "ignoreDiacriticErrors": self.input_processing.ignore_diacritic_errors,
             },
             "fieldMapping": {
                 "prompt": self.field_mapping.prompt,

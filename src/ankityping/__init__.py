@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 try:
-    from aqt import mw, QAction
-    from aqt.qt import QMenu, QKeySequence
+    from aqt import QAction, mw
+    from aqt.qt import QKeySequence, QMenu
 except ImportError:
     # Fallback for testing outside of Anki
     mw = None
@@ -12,8 +12,8 @@ except ImportError:
     QMenu = None
     QKeySequence = None
 
-from .ui.typing_dialog import TypingDialog
 from .ui.config_dialog import ConfigDialog
+from .ui.typing_dialog import TypingDialog
 
 
 def open_typing_practice() -> None:
@@ -43,10 +43,9 @@ def open_typing_practice() -> None:
         print(f"AnkiTyping: Error opening dialog: {e}")
         # Show error message
         from aqt.qt import QMessageBox
+
         QMessageBox.critical(
-            mw,
-            "AnkiTyping Error",
-            f"Failed to open typing practice: {e}"
+            mw, "AnkiTyping Error", f"Failed to open typing practice: {e}"
         )
 
 
@@ -62,10 +61,9 @@ def open_settings() -> None:
     except Exception as e:
         # Show error message
         from aqt.qt import QMessageBox
+
         QMessageBox.critical(
-            mw,
-            "AnkiTyping Settings Error",
-            f"Failed to open settings: {e}"
+            mw, "AnkiTyping Settings Error", f"Failed to open settings: {e}"
         )
 
 
@@ -78,7 +76,7 @@ def add_menu_items() -> None:
         # Create menu actions
         typing_action = QAction("Typing Practice", mw)
         if QKeySequence:
-            typing_action.setShortcut(QKeySequence("Ctrl+T"))
+            typing_action.setShortcut(QKeySequence("Ctrl+Shift+T"))
         typing_action.triggered.connect(open_typing_practice)
 
         settings_action = QAction("Typing Practice Settings", mw)
@@ -101,6 +99,7 @@ def setup_initial_config() -> None:
 
     try:
         from .config import get_config
+
         config = get_config()
         print(f"AnkiTyping: Configuration loaded - Theme: {config.ui.theme}")
     except Exception as e:
@@ -113,7 +112,7 @@ def setup_global_shortcuts() -> None:
         return
 
     try:
-        from aqt.qt import QShortcut, QKeySequence
+        from aqt.qt import QKeySequence, QShortcut
 
         # Ctrl+T to open typing practice
         typing_shortcut = QShortcut(QKeySequence("Ctrl+T"), mw)
@@ -146,8 +145,9 @@ except Exception as e:
 def _test_dialog() -> None:
     """Test function for dialog development."""
     try:
-        from aqt.qt import QApplication
         import sys
+
+        from aqt.qt import QApplication
 
         app = QApplication.instance()
         if app is None:
