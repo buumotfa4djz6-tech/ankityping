@@ -271,13 +271,66 @@ class TypingDialog(QMainWindow):
                 print(f"DEBUG: Card changed detected in main window: {self._last_card_id} -> {current_card_id}")
                 self._last_card_id = current_card_id
 
-                # Update the typing interface if we're not currently in the middle of a practice session
-                if not self.is_practice_active or not self.stats_collector.is_running():
-                    print("DEBUG: Updating typing interface with new card")
-                    self._load_current_card()
+                # Force update the typing interface regardless of practice state
+                print("DEBUG: Force updating typing interface with new card")
+                self._force_update_card(current_card_data)
 
         except Exception as e:
             print(f"DEBUG: Error checking card change: {e}")
+
+    def _force_update_card(self, new_card_data) -> None:
+        """Force update the typing interface with new card data."""
+        try:
+            print("DEBUG: Force updating card components")
+
+            # End current practice session if running
+            if self.stats_collector.is_running():
+                print("DEBUG: Ending current practice session")
+                self.stats_collector.end_session()
+            self.stats_collector.reset()
+
+            # Update card data
+            self.card_data = new_card_data
+
+            # Reinitialize all components with new card data
+            print(f"DEBUG: Creating new typing engine for: {self.card_data.target[:50]}...")
+            self.typing_engine = TypingEngine(
+                self.card_data.target,
+                self.config.behavior.input_mode
+            )
+            self.hint_manager = HintManager(self.card_data.target)
+
+            # Update the typing display
+            print("DEBUG: Updating typing display")
+            self.typing_display.set_typing_engine(self.typing_engine)
+            self.typing_display.refresh()
+
+            # Update UI elements
+            print("DEBUG: Updating UI elements")
+            self.prompt_label.setText(self.card_data.prompt)
+            self.prompt_label.repaint()  # Force immediate repaint
+
+            # Update status bar
+            self.stats_label.setText("Ready to start typing...")
+            self.stats_label.repaint()
+
+            # Update window title
+            self.setWindowTitle(f"Typing Practice - {self.card_data.note_type or 'Card'}")
+
+            # Force UI update
+            self.update()
+            self.repaint()
+
+            print(f"DEBUG: Card update completed - New target: {self.card_data.target[:30]}...")
+
+            # Auto focus if enabled
+            if self.config.behavior.auto_focus:
+                QTimer.singleShot(100, self._focus_typing_area)
+
+        except Exception as e:
+            print(f"ERROR: Failed to force update card: {e}")
+            import traceback
+            traceback.print_exc()
 
     def _apply_theme(self) -> None:
         """Apply the configured theme."""
@@ -380,48 +433,49 @@ class TypingDialog(QMainWindow):
 
             print(f"DEBUG: Loading card ID: {new_card_data.card_id}")
 
-            # Only update if card actually changed or this is the first load
-            should_update = (
-                not hasattr(self, 'card_data') or
-                not self.card_data or
-                self.card_data.card_id != new_card_data.card_id
+            # Always update components to ensure UI is fresh
+            print(f"DEBUG: Updating components with card data")
+            self.card_data = new_card_data
+
+            # Reset stats
+            if self.stats_collector.is_running():
+                self.stats_collector.end_session()
+            self.stats_collector.reset()
+
+            # Initialize components with new card data
+            self.typing_engine = TypingEngine(
+                self.card_data.target,
+                self.config.behavior.input_mode
             )
+            self.hint_manager = HintManager(self.card_data.target)
 
-            if should_update:
-                print(f"DEBUG: Card changed or first load, updating components")
-                self.card_data = new_card_data
+            # Set up the typing display
+            self.typing_display.set_typing_engine(self.typing_engine)
 
-                # Reset stats if this is a new card
-                if self.stats_collector.is_running():
-                    self.stats_collector.end_session()
-                self.stats_collector.reset()
+            # Update UI
+            print(f"DEBUG: Updating UI with prompt: {self.card_data.prompt[:30]}...")
+            self.prompt_label.setText(self.card_data.prompt)
+            self.prompt_label.update()  # Force update
+            self.typing_display.refresh()
 
-                # Initialize components with new card data
-                self.typing_engine = TypingEngine(
-                    self.card_data.target,
-                    self.config.behavior.input_mode
-                )
-                self.hint_manager = HintManager(self.card_data.target)
+            # Update status bar
+            self.stats_label.setText("Ready to start typing...")
+            self.stats_label.update()  # Force update
 
-                # Set up the typing display
-                self.typing_display.set_typing_engine(self.typing_engine)
+            # Update window title
+            self.setWindowTitle(f"Typing Practice - {self.card_data.note_type or 'Card'}")
 
-                # Update UI
-                self.prompt_label.setText(self.card_data.prompt)
-                self.typing_display.refresh()
+            # Play audio if configured
+            if self.config.behavior.auto_play_audio and self.card_data.audio:
+                self.anki_integration.play_audio(self.card_data.audio)
 
-                # Update status bar
-                self.stats_label.setText("Ready to start typing...")
+            # Update monitor's last card ID
+            if hasattr(self, '_last_card_id'):
+                self._last_card_id = self.card_data.card_id
 
-                # Play audio if configured
-                if self.config.behavior.auto_play_audio and self.card_data.audio:
-                    self.anki_integration.play_audio(self.card_data.audio)
-
-                # Update monitor's last card ID
-                if hasattr(self, '_last_card_id'):
-                    self._last_card_id = self.card_data.card_id
-            else:
-                print(f"DEBUG: Same card, skipping update")
+            # Force complete UI refresh
+            self.update()
+            print(f"DEBUG: Card load completed - Target: {self.card_data.target[:30]}...")
 
             # Auto focus if enabled
             if self.config.behavior.auto_focus:
