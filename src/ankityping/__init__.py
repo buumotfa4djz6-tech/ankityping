@@ -4,12 +4,13 @@ from __future__ import annotations
 
 try:
     from aqt import mw, QAction
-    from aqt.qt import QMenu
+    from aqt.qt import QMenu, QKeySequence
 except ImportError:
     # Fallback for testing outside of Anki
     mw = None
     QAction = None
     QMenu = None
+    QKeySequence = None
 
 from .ui.typing_dialog import TypingDialog
 from .ui.config_dialog import ConfigDialog
@@ -76,6 +77,8 @@ def add_menu_items() -> None:
     try:
         # Create menu actions
         typing_action = QAction("Typing Practice", mw)
+        if QKeySequence:
+            typing_action.setShortcut(QKeySequence("Ctrl+T"))
         typing_action.triggered.connect(open_typing_practice)
 
         settings_action = QAction("Typing Practice Settings", mw)
@@ -104,6 +107,23 @@ def setup_initial_config() -> None:
         print(f"AnkiTyping: Failed to setup initial config: {e}")
 
 
+def setup_global_shortcuts() -> None:
+    """Setup global keyboard shortcuts."""
+    if not mw:
+        return
+
+    try:
+        from aqt.qt import QShortcut, QKeySequence
+
+        # Ctrl+T to open typing practice
+        typing_shortcut = QShortcut(QKeySequence("Ctrl+T"), mw)
+        typing_shortcut.activated.connect(open_typing_practice)
+        print("AnkiTyping: Ctrl+T shortcut registered")
+
+    except Exception as e:
+        print(f"AnkiTyping: Failed to setup global shortcuts: {e}")
+
+
 # Plugin initialization
 try:
     if mw:
@@ -112,6 +132,9 @@ try:
 
         # Add menu items
         add_menu_items()
+
+        # Setup global shortcuts
+        setup_global_shortcuts()
 
         print("AnkiTyping: Plugin loaded successfully")
 
