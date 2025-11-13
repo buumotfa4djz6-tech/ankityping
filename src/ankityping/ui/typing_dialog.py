@@ -6,11 +6,13 @@ from typing import Optional
 import sys
 
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit,
-    QPushButton, QMessageBox, QWidget
+    QMainWindow, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit,
+    QPushButton, QMessageBox, QWidget, QMenuBar, QMenu,
+    QApplication, QStatusBar, QSplitter, QFrame
 )
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QFont, QPalette, QColor
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QSize
+from PyQt6.QtGui import QFont, QPalette, QColor, QAction, QKeySequence
+from PyQt6.QtWidgets import QAbstractButton
 
 from ..anki_integration import AnkiIntegration, CardData, PracticeStats
 from ..config import get_config, Config
@@ -19,8 +21,11 @@ from ..core.stats import StatsCollector
 from ..core.hint import HintManager, HintLevel
 
 
-class TypingDialog(QDialog):
-    """Main typing practice dialog."""
+class TypingDialog(QMainWindow):
+    """Main typing practice window."""
+
+    # Signal for card completion
+    card_completed = pyqtSignal(int)  # rating as parameter
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -30,31 +35,46 @@ class TypingDialog(QDialog):
         self.stats_collector = StatsCollector(self._on_stats_update)
         self.hint_manager: Optional[HintManager] = None
         self.card_data: Optional[CardData] = None
+        self.is_practice_active = False
 
+        # Timers
         self._error_flash_timer = QTimer()
         self._error_flash_timer.setSingleShot(True)
         self._error_flash_timer.timeout.connect(self._clear_error_flash)
 
         self._setup_ui()
+        self._setup_menu_bar()
+        self._setup_status_bar()
         self._setup_shortcuts()
         self._load_current_card()
 
     def _setup_ui(self) -> None:
         """Setup the user interface."""
         self.setWindowTitle("Anki Typing Practice")
-        self.setModal(True)
-        self.resize(600, 400)
+        self.resize(self.config.ui.window_width, self.config.ui.window_height)
 
         if self.config.ui.always_on_top:
             self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
 
         self._apply_theme()
 
+        # Create central widget
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+
         # Main layout
         layout = QVBoxLayout()
-        self.setLayout(layout)
+        central_widget.setLayout(layout)
 
-        # Prompt label
+        # Create splitter for better layout management
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        layout.addWidget(splitter)
+
+        # Top section - Prompt
+        prompt_frame = QFrame()
+        prompt_layout = QVBoxLayout()
+        prompt_frame.setLayout(prompt_layout)
+
         self.prompt_label = QLabel("Loading...")
         self.prompt_label.setWordWrap(True)
         self.prompt_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -62,9 +82,15 @@ class TypingDialog(QDialog):
         prompt_font.setPointSize(14)
         prompt_font.setItalic(True)
         self.prompt_label.setFont(prompt_font)
-        layout.addWidget(self.prompt_label)
+        prompt_layout.addWidget(self.prompt_label)
 
-        # Typing display
+        splitter.addWidget(prompt_frame)
+
+        # Middle section - Typing area
+        typing_frame = QFrame()
+        typing_layout = QVBoxLayout()
+        typing_frame.setLayout(typing_layout)
+
         self.typing_display = QTextEdit()
         self.typing_display.setReadOnly(True)
         self.typing_display.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -72,15 +98,8 @@ class TypingDialog(QDialog):
         typing_font.setPointSize(18)
         typing_font.setFamily("Consolas, monospace")
         self.typing_display.setFont(typing_font)
-        layout.addWidget(self.typing_display)
-
-        # Stats label
-        self.stats_label = QLabel("Ready to start typing...")
-        self.stats_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        stats_font = QFont()
-        stats_font.setPointSize(10)
-        self.stats_label.setFont(stats_font)
-        layout.addWidget(self.stats_label)
+        self.typing_display.setMinimumHeight(120)
+        typing_layout.addWidget(self.typing_display)
 
         # Hint label
         self.hint_label = QLabel("")
@@ -90,33 +109,134 @@ class TypingDialog(QDialog):
         hint_font.setPointSize(12)
         hint_font.setItalic(True)
         self.hint_label.setFont(hint_font)
-        layout.addWidget(self.hint_label)
+        typing_layout.addWidget(self.hint_label)
 
-        # Control buttons
-        button_layout = QHBoxLayout()
-        layout.addLayout(button_layout)
+        splitter.addWidget(typing_frame)
+
+        # Bottom section - Controls
+        control_frame = QFrame()
+        control_layout = QHBoxLayout()
+        control_frame.setLayout(control_layout)
 
         self.hint_button = QPushButton("Show Hint")
         self.hint_button.clicked.connect(self._show_hint)
-        button_layout.addWidget(self.hint_button)
+        control_layout.addWidget(self.hint_button)
 
         self.reset_button = QPushButton("Reset")
         self.reset_button.clicked.connect(self._reset_practice)
-        button_layout.addWidget(self.reset_button)
+        control_layout.addWidget(self.reset_button)
 
         self.give_up_button = QPushButton("Give Up")
         self.give_up_button.clicked.connect(self._give_up)
-        button_layout.addWidget(self.give_up_button)
+        control_layout.addWidget(self.give_up_button)
 
-        # Set button order correctly for RTL languages
-        if sys.getdefaultencoding().lower().startswith('utf'):
-            button_layout.setDirection(QHBoxLayout.Direction.RightToLeft)
+        # Add buttons to main layout
+        layout.addWidget(control_frame)
+
+        # Set splitter sizes
+        splitter.setSizes([100, 300, 80])  # Prompt, Typing, Controls
+
+        # Enable focus for keyboard input
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
+    def _setup_menu_bar(self) -> None:
+        """Setup the menu bar."""
+        menubar = self.menuBar()
+
+        # File menu
+        file_menu = menubar.addMenu("File")
+
+        next_card_action = QAction("Next Card", self)
+        next_card_action.setShortcut(QKeySequence("Ctrl+N"))
+        next_card_action.triggered.connect(self._next_card)
+        file_menu.addAction(next_card_action)
+
+        file_menu.addSeparator()
+
+        settings_action = QAction("Settings...", self)
+        settings_action.setShortcut(QKeySequence("Ctrl+,"))
+        settings_action.triggered.connect(self._open_settings)
+        file_menu.addAction(settings_action)
+
+        file_menu.addSeparator()
+
+        exit_action = QAction("Exit", self)
+        exit_action.setShortcut(QKeySequence("Ctrl+Q"))
+        exit_action.triggered.connect(self.close)
+        file_menu.addAction(exit_action)
+
+        # Practice menu
+        practice_menu = menubar.addMenu("Practice")
+
+        pause_action = QAction("Pause/Resume", self)
+        pause_action.setShortcut(QKeySequence("Space"))
+        pause_action.triggered.connect(self._toggle_pause)
+        practice_menu.addAction(pause_action)
+
+        restart_action = QAction("Restart Card", self)
+        restart_action.setShortcut(QKeySequence("Ctrl+R"))
+        restart_action.triggered.connect(self._reset_practice)
+        practice_menu.addAction(restart_action)
+
+        practice_menu.addSeparator()
+
+        # Mode submenu
+        mode_menu = practice_menu.addMenu("Input Mode")
+
+        progressive_action = QAction("Progressive Mode", self)
+        progressive_action.setCheckable(True)
+        progressive_action.triggered.connect(lambda: self._change_input_mode("progressive"))
+        mode_menu.addAction(progressive_action)
+
+        accompanying_action = QAction("Accompanying Mode", self)
+        accompanying_action.setCheckable(True)
+        accompanying_action.triggered.connect(lambda: self._change_input_mode("accompanying"))
+        mode_menu.addAction(accompanying_action)
+
+        # Set current mode checked
+        if self.config.behavior.input_mode == "progressive":
+            progressive_action.setChecked(True)
+        else:
+            accompanying_action.setChecked(True)
+
+        # Help menu
+        help_menu = menubar.addMenu("Help")
+
+        shortcuts_action = QAction("Keyboard Shortcuts", self)
+        shortcuts_action.triggered.connect(self._show_shortcuts)
+        help_menu.addAction(shortcuts_action)
+
+        help_menu.addSeparator()
+
+        about_action = QAction("About", self)
+        about_action.triggered.connect(self._show_about)
+        help_menu.addAction(about_action)
+
+    def _setup_status_bar(self) -> None:
+        """Setup the status bar."""
+        self.status_bar = QStatusBar()
+        self.setStatusBar(self.status_bar)
+
+        self.stats_label = QLabel("Ready to start typing...")
+        self.status_bar.addWidget(self.stats_label)
+
+        # Add permanent widgets
+        self.mode_label = QLabel(f"Mode: {self.config.behavior.input_mode.capitalize()}")
+        self.status_bar.addPermanentWidget(self.mode_label)
+
+    def _setup_shortcuts(self) -> None:
+        """Setup keyboard shortcuts."""
+        # Escape to give up
+        self.give_up_button.setShortcut("Esc")
+
+        # Ctrl+H for hint
+        self.hint_button.setShortcut("Ctrl+H")
 
     def _apply_theme(self) -> None:
         """Apply the configured theme."""
         if self.config.ui.theme == "dark":
             self.setStyleSheet("""
-                QDialog {
+                QMainWindow {
                     background-color: #2b2b2b;
                     color: #ffffff;
                 }
@@ -142,10 +262,21 @@ class TypingDialog(QDialog):
                 QPushButton:pressed {
                     background-color: #353535;
                 }
+                QMenuBar {
+                    background-color: #2b2b2b;
+                    color: #ffffff;
+                }
+                QStatusBar {
+                    background-color: #2b2b2b;
+                    color: #ffffff;
+                }
+                QFrame {
+                    background-color: #2b2b2b;
+                }
             """)
         else:  # light theme
             self.setStyleSheet("""
-                QDialog {
+                QMainWindow {
                     background-color: #ffffff;
                     color: #000000;
                 }
@@ -171,18 +302,18 @@ class TypingDialog(QDialog):
                 QPushButton:pressed {
                     background-color: #c0c0c0;
                 }
+                QMenuBar {
+                    background-color: #ffffff;
+                    color: #000000;
+                }
+                QStatusBar {
+                    background-color: #f0f0f0;
+                    color: #000000;
+                }
+                QFrame {
+                    background-color: #ffffff;
+                }
             """)
-
-    def _setup_shortcuts(self) -> None:
-        """Setup keyboard shortcuts."""
-        # Escape to give up
-        self.give_up_button.setShortcut("Esc")
-
-        # Ctrl+R to reset
-        self.reset_button.setShortcut("Ctrl+R")
-
-        # Ctrl+H for hint
-        self.hint_button.setShortcut("Ctrl+H")
 
     def _load_current_card(self) -> None:
         """Load data from the current Anki card."""
@@ -191,24 +322,40 @@ class TypingDialog(QDialog):
             if not self.card_data:
                 QMessageBox.warning(self, "No Card",
                                    "No card is currently displayed. Please open a card in the Anki reviewer first.")
-                self.reject()
+                self.close()
                 return
 
             # Initialize components
-            self.typing_engine = TypingEngine(self.card_data.target)
+            self.typing_engine = TypingEngine(
+                self.card_data.target,
+                self.config.behavior.input_mode
+            )
             self.hint_manager = HintManager(self.card_data.target)
 
             # Update UI
             self.prompt_label.setText(self.card_data.prompt)
             self._update_typing_display()
 
+            # Auto focus if enabled
+            if self.config.behavior.auto_focus:
+                QTimer.singleShot(100, self._focus_typing_area)
+
             # Play audio if configured
             if self.config.behavior.auto_play_audio and self.card_data.audio:
                 self.anki_integration.play_audio(self.card_data.audio)
 
+            # Mark practice as active
+            self.is_practice_active = True
+
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to load card: {e}")
-            self.reject()
+            self.close()
+
+    def _focus_typing_area(self) -> None:
+        """Set focus to allow keyboard input."""
+        self.setFocus()
+        self.raise_()
+        self.activateWindow()
 
     def _update_typing_display(self) -> None:
         """Update the typing display with current engine state."""
@@ -278,8 +425,12 @@ class TypingDialog(QDialog):
         # Update display
         self._update_typing_display()
 
+        # Refocus
+        if self.config.behavior.auto_focus:
+            self._focus_typing_area()
+
     def _give_up(self) -> None:
-        """Give up and close dialog."""
+        """Give up and move to next card."""
         reply = QMessageBox.question(
             self, "Give Up?",
             "Are you sure you want to give up? This will count as a failed review.",
@@ -312,17 +463,21 @@ class TypingDialog(QDialog):
             score=score
         )
 
-        # Show completion message
-        if success:
-            score_text = f"Score: {score}/100"
-            stats_text = f"Time: {time_seconds:.1f}s, Errors: {error_count}, Hints: {hint_count}"
-            QMessageBox.information(
-                self, "Practice Complete!",
-                f"Excellent work!\n\n{score_text}\n{stats_text}"
-            )
-        else:
-            QMessageBox.information(self, "Practice Given Up",
-                                   "Don't worry! Keep practicing and you'll improve.")
+        # Calculate rating
+        rating = self.anki_integration._calculate_rating(practice_stats)
+
+        # Show completion message if enabled
+        if self.config.behavior.show_completion_popup:
+            if success:
+                score_text = f"Score: {score}/100"
+                stats_text = f"Time: {time_seconds:.1f}s, Errors: {error_count}, Hints: {hint_count}"
+                QMessageBox.information(
+                    self, "Practice Complete!",
+                    f"Excellent work!\n\n{score_text}\n{stats_text}"
+                )
+            else:
+                QMessageBox.information(self, "Practice Given Up",
+                                       "Don't worry! Keep practicing and you'll improve.")
 
         # Submit to Anki
         try:
@@ -330,7 +485,88 @@ class TypingDialog(QDialog):
         except Exception as e:
             QMessageBox.warning(self, "Warning", f"Could not submit to Anki: {e}")
 
-        self.accept()
+        # Emit completion signal
+        self.card_completed.emit(rating)
+
+        # Load next card
+        self._next_card()
+
+    def _next_card(self) -> None:
+        """Load the next card."""
+        try:
+            # Move to next card in Anki
+            self.anki_integration.submit_answer(1)  # Use "Again" rating as default
+
+            # Reset stats and load new card
+            self.stats_collector.reset()
+            self._load_current_card()
+
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to load next card: {e}")
+
+    def _toggle_pause(self) -> None:
+        """Toggle pause state."""
+        if self.stats_collector.is_running():
+            self.stats_collector.end_session()
+            self.stats_label.setText("Paused - Press Space to resume")
+        else:
+            self.stats_collector.start_session(self.card_data.target if self.card_data else "")
+            self._focus_typing_area()
+
+    def _change_input_mode(self, mode: str) -> None:
+        """Change the input mode."""
+        if self.typing_engine and self.typing_engine.input_mode != mode:
+            self.typing_engine.input_mode = mode
+            self._update_typing_display()
+            self.mode_label.setText(f"Mode: {mode.capitalize()}")
+
+    def _open_settings(self) -> None:
+        """Open settings dialog."""
+        try:
+            from .config_dialog import ConfigDialog
+            dialog = ConfigDialog(self)
+            if dialog.exec() == QMessageBox.StandardButton.Accepted:
+                # Reload config and apply changes
+                self.config = get_config()
+                self._apply_theme()
+                if self.typing_engine:
+                    self.typing_engine.input_mode = self.config.behavior.input_mode
+                    self._update_typing_display()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to open settings: {e}")
+
+    def _show_shortcuts(self) -> None:
+        """Show keyboard shortcuts dialog."""
+        shortcuts_text = """
+        <h3>Keyboard Shortcuts</h3>
+        <table>
+        <tr><td><b>Typing:</b></td><td>Start typing to begin practice</td></tr>
+        <tr><td><b>Backspace:</b></td><td>Delete previous character</td></tr>
+        <tr><td><b>Ctrl+H:</b></td><td>Show hint</td></tr>
+        <tr><td><b>Ctrl+R:</b></td><td>Reset current practice</td></tr>
+        <tr><td><b>Ctrl+N:</b></td><td>Next card</td></tr>
+        <tr><td><b>Space:</b></td><td>Pause/Resume</td></tr>
+        <tr><td><b>Esc:</b></td><td>Give up</td></tr>
+        <tr><td><b>Ctrl+Q:</b></td><td>Exit</td></tr>
+        </table>
+        """
+        QMessageBox.information(self, "Keyboard Shortcuts", shortcuts_text)
+
+    def _show_about(self) -> None:
+        """Show about dialog."""
+        about_text = """
+        <h3>Anki Typing Practice</h3>
+        <p>Version 1.0.0</p>
+        <p>An immersive typing practice plugin for Anki.</p>
+        <p>Features:</p>
+        <ul>
+        <li>Real-time typing feedback</li>
+        <li>Performance statistics</li>
+        <li>Multiple input modes</li>
+        <li>SRS integration</li>
+        </ul>
+        """
+        QMessageBox.about(self, "About", about_text)
 
     def _flash_error(self) -> None:
         """Flash red background for error feedback."""
@@ -343,7 +579,8 @@ class TypingDialog(QDialog):
 
     def keyPressEvent(self, event) -> None:
         """Handle key press events."""
-        if not self.typing_engine or not self.stats_collector.is_running():
+        if not self.typing_engine or not self.is_practice_active:
+            super().keyPressEvent(event)
             return
 
         # Start session on first keypress
@@ -356,11 +593,12 @@ class TypingDialog(QDialog):
         # Handle backspace
         if key == Qt.Key.Key_Backspace:
             result = self.typing_engine.process_input("\b")
-        # Handle normal characters
+        # Handle other control characters (ignore them)
         elif text and text.isprintable():
             result = self.typing_engine.process_input(text)
         else:
             # Ignore other keys
+            super().keyPressEvent(event)
             return
 
         # Update statistics
@@ -377,9 +615,27 @@ class TypingDialog(QDialog):
         # Check if complete
         if result.is_complete:
             self._finish_practice(success=True)
+        else:
+            super().keyPressEvent(event)
+
+    def showEvent(self, event) -> None:
+        """Handle window show event."""
+        super().showEvent(event)
+
+        # Auto focus when window is shown
+        if self.config.behavior.auto_focus and self.is_practice_active:
+            QTimer.singleShot(100, self._focus_typing_area)
+
+    def resizeEvent(self, event) -> None:
+        """Handle window resize event."""
+        super().resizeEvent(event)
+
+        # Save new window size to config
+        self.config.ui.window_width = event.size().width()
+        self.config.ui.window_height = event.size().height()
 
     def closeEvent(self, event) -> None:
-        """Handle dialog close event."""
+        """Handle window close event."""
         if self.stats_collector.is_running():
             reply = QMessageBox.question(
                 self, "Close Without Finishing?",

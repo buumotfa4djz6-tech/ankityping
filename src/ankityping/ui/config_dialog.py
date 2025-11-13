@@ -80,7 +80,25 @@ class ConfigDialog(QDialog):
         self.reset_button_group.addButton(self.reset_sentence_radio)
         self.reset_button_group.addButton(self.reset_word_radio)
 
+        # Input mode
+        input_layout = QHBoxLayout()
+        self.progressive_radio = QRadioButton("Progressive Mode")
+        self.accompanying_radio = QRadioButton("Accompanying Mode")
+        input_layout.addWidget(self.progressive_radio)
+        input_layout.addWidget(self.accompanying_radio)
+        behavior_layout.addRow("Input Mode:", input_layout)
+
+        self.input_button_group = QButtonGroup()
+        self.input_button_group.addButton(self.progressive_radio)
+        self.input_button_group.addButton(self.accompanying_radio)
+
         # Checkboxes
+        self.auto_focus_checkbox = QCheckBox("Auto-focus on Start")
+        behavior_layout.addRow(self.auto_focus_checkbox)
+
+        self.show_completion_popup_checkbox = QCheckBox("Show Completion Popup")
+        behavior_layout.addRow(self.show_completion_popup_checkbox)
+
         self.sound_enabled_checkbox = QCheckBox("Enable Sound Effects")
         behavior_layout.addRow(self.sound_enabled_checkbox)
 
@@ -180,6 +198,13 @@ class ConfigDialog(QDialog):
         else:
             self.reset_word_radio.setChecked(True)
 
+        if self.config.behavior.input_mode == "progressive":
+            self.progressive_radio.setChecked(True)
+        else:
+            self.accompanying_radio.setChecked(True)
+
+        self.auto_focus_checkbox.setChecked(self.config.behavior.auto_focus)
+        self.show_completion_popup_checkbox.setChecked(self.config.behavior.show_completion_popup)
         self.sound_enabled_checkbox.setChecked(self.config.behavior.sound_enabled)
         self.auto_play_audio_checkbox.setChecked(self.config.behavior.auto_play_audio)
         self.show_timer_checkbox.setChecked(self.config.behavior.show_timer)
@@ -234,6 +259,11 @@ class ConfigDialog(QDialog):
             new_config.behavior.reset_mode = (
                 "sentence" if self.reset_sentence_radio.isChecked() else "word"
             )
+            new_config.behavior.input_mode = (
+                "progressive" if self.progressive_radio.isChecked() else "accompanying"
+            )
+            new_config.behavior.auto_focus = self.auto_focus_checkbox.isChecked()
+            new_config.behavior.show_completion_popup = self.show_completion_popup_checkbox.isChecked()
             new_config.behavior.sound_enabled = self.sound_enabled_checkbox.isChecked()
             new_config.behavior.auto_play_audio = self.auto_play_audio_checkbox.isChecked()
             new_config.behavior.show_timer = self.show_timer_checkbox.isChecked()

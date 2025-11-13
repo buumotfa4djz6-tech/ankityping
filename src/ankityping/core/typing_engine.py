@@ -37,8 +37,9 @@ class TypingResult:
 class TypingEngine:
     """Core engine for managing typing practice."""
 
-    def __init__(self, target_text: str):
+    def __init__(self, target_text: str, input_mode: str = "progressive"):
         self.target_text = target_text
+        self.input_mode = input_mode  # "progressive" or "accompanying"
         self.typed_text = ""
         self.current_position = 0
         self.error_count = 0
@@ -58,8 +59,11 @@ class TypingEngine:
         characters = []
         for i, char in enumerate(self.target_text):
             state = CharacterState.UNDEFINED
-            if i == 0:
+            if i == 0 and self.input_mode == "accompanying":
                 state = CharacterState.CURRENT
+            elif i == 0 and self.input_mode == "progressive":
+                # In progressive mode, show first character as placeholder
+                pass  # Keep UNDEFINED
             characters.append(CharacterInfo(char=char, state=state, position=i))
         return characters
 
@@ -116,10 +120,14 @@ class TypingEngine:
 
         # Flash error state for current character
         if self.current_position < len(self._characters):
-            self._characters[self.current_position].state = CharacterState.ERROR
-
-        # Reset to current state after brief error display
-        # (UI layer will handle the visual feedback timing)
+            if self.input_mode == "progressive":
+                # In progressive mode, incorrect input doesn't advance position
+                self._characters[self.current_position].state = CharacterState.ERROR
+                # Reset to UNDEFINED after error
+                # (UI layer will handle the visual feedback timing)
+            else:
+                # In accompanying mode, show error but keep position
+                self._characters[self.current_position].state = CharacterState.ERROR
 
         return self._create_result(
             is_correct=False,
@@ -211,15 +219,25 @@ class TypingEngine:
             elif char == "&":
                 html_parts.append("&amp;")
             else:
-                # Apply styling based on state
+                # Apply styling based on state and input mode
                 if state == CharacterState.CORRECT:
                     html_parts.append(f'<span style="color: #4CAF50; font-weight: bold;">{char}</span>')
                 elif state == CharacterState.CURRENT:
-                    html_parts.append(f'<span style="background-color: #FFEB3B; text-decoration: underline;">{char}</span>')
+                    if self.input_mode == "progressive":
+                        # In progressive mode, show placeholder for current character
+                        html_parts.append(f'<span style="color: #FF9800; font-weight: bold; text-decoration: underline;">_</span>')
+                    else:
+                        # In accompanying mode, highlight the actual character
+                        html_parts.append(f'<span style="background-color: #FFEB3B; text-decoration: underline;">{char}</span>')
                 elif state == CharacterState.ERROR:
                     html_parts.append(f'<span style="color: #F44336; font-weight: bold;">{char}</span>')
                 else:  # UNDEFINED
-                    html_parts.append(f'<span style="color: #999999;">{char}</span>')
+                    if self.input_mode == "progressive":
+                        # In progressive mode, show placeholders for undefined characters
+                        html_parts.append('<span style="color: #999999;">_</span>')
+                    else:
+                        # In accompanying mode, show actual characters
+                        html_parts.append(f'<span style="color: #999999;">{char}</span>')
 
         return "".join(html_parts)
 
@@ -252,7 +270,9 @@ class TypingEngine:
         correct_attempts = self.current_position - self.error_count
         return max(0.0, correct_attempts / total_attempts)
 
-    def set_target_text(self, target_text: str) -> None:
+    def set_target_text(self, target_text: str, input_mode: str = None) -> None:
         """Set new target text and reset state."""
         self.target_text = target_text
+        if input_mode:
+            self.input_mode = input_mode
         self._reset_state()

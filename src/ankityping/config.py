@@ -29,6 +29,9 @@ class BehaviorConfig:
     auto_play_audio: bool = True
     show_timer: bool = True
     show_errors: bool = True
+    input_mode: str = "progressive"  # "progressive" or "accompanying"
+    auto_focus: bool = True
+    show_completion_popup: bool = False
 
 
 @dataclass
@@ -65,6 +68,9 @@ class Config:
             config.behavior.auto_play_audio = behavior_data.get("autoPlayAudio", config.behavior.auto_play_audio)
             config.behavior.show_timer = behavior_data.get("showTimer", config.behavior.show_timer)
             config.behavior.show_errors = behavior_data.get("showErrors", config.behavior.show_errors)
+            config.behavior.input_mode = behavior_data.get("inputMode", config.behavior.input_mode)
+            config.behavior.auto_focus = behavior_data.get("autoFocus", config.behavior.auto_focus)
+            config.behavior.show_completion_popup = behavior_data.get("showCompletionPopup", config.behavior.show_completion_popup)
 
         if "fieldMapping" in data:
             field_data = data["fieldMapping"]
@@ -89,6 +95,9 @@ class Config:
                 "autoPlayAudio": self.behavior.auto_play_audio,
                 "showTimer": self.behavior.show_timer,
                 "showErrors": self.behavior.show_errors,
+                "inputMode": self.behavior.input_mode,
+                "autoFocus": self.behavior.auto_focus,
+                "showCompletionPopup": self.behavior.show_completion_popup,
             },
             "fieldMapping": {
                 "prompt": self.field_mapping.prompt,

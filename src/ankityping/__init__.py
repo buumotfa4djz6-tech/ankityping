@@ -16,14 +16,14 @@ from .ui.config_dialog import ConfigDialog
 
 
 def open_typing_practice() -> None:
-    """Open the typing practice dialog."""
+    """Open the typing practice window."""
     if mw is None:
         print("AnkiTyping: Not running in Anki context")
         return
 
     try:
         dialog = TypingDialog(mw)
-        dialog.exec()
+        dialog.show()
     except Exception as e:
         # Show error message
         from aqt.qt import QMessageBox
