@@ -1,0 +1,12 @@
+{
+  "name": "Anki Typing Practice",
+  "mod": 1736589720,
+  "version": "1.0.0",
+  "min_point_version": 23,
+  "max_point_version": 100,
+  "homepage": "https://github.com/yourusername/ankityping",
+  "conflicts": [],
+  "targets": [
+    "anki"
+  ]
+}

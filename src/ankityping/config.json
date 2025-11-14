@@ -1,0 +1,48 @@
+{
+  "ui": {
+    "theme": "dark",
+    "window_width": 600,
+    "window_height": 400,
+    "always_on_top": false,
+    "font_family": "Arial",
+    "font_size": 12
+  },
+  "behavior": {
+    "reset_mode": "sentence",
+    "sound_enabled": true,
+    "auto_play_audio": true,
+    "show_timer": true,
+    "show_errors": true,
+    "input_mode": "progressive",
+    "auto_focus": true,
+    "show_completion_popup": false
+  },
+  "field_processing": {
+    "remove_html_tags": true,
+    "preserve_line_breaks": true,
+    "handle_html_entities": true,
+    "normalize_whitespace": true,
+    "remove_extra_spaces": true,
+    "keep_important_formatting": false,
+    "replace_html_formatting": true
+  },
+  "input_processing": {
+    "handle_punctuation": true,
+    "auto_punctuation": true,
+    "ignore_punctuation_errors": false,
+    "handle_whitespace": true,
+    "ignore_extra_spaces": true,
+    "auto_correct_spaces": true,
+    "case_sensitive": true,
+    "auto_correct_case": false,
+    "handle_diacritics": true,
+    "ignore_diacritic_errors": false
+  },
+  "field_mapping": {
+    "prompt": "Front",
+    "target": "Back",
+    "audio": "Audio"
+  },
+  "deck_settings": {},
+  "last_used_deck": null
+}

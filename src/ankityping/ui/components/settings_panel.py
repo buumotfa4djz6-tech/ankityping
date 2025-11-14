@@ -12,10 +12,13 @@ from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont, QPalette, QColor
 
 try:
-    from ..utils import get_deck_manager, DeckManager
+    from ...utils import get_deck_manager, DeckManager
 except ImportError:
-    get_deck_manager = None
-    DeckManager = None
+    try:
+        from ..utils import get_deck_manager, DeckManager
+    except ImportError:
+        get_deck_manager = None
+        DeckManager = None
 
 
 class SettingsPanel(QDialog):
@@ -27,7 +30,17 @@ class SettingsPanel(QDialog):
     def __init__(self, config, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.config = config
-        self.deck_manager = get_deck_manager(config) if get_deck_manager else None
+
+        # Initialize deck manager
+        try:
+            self.deck_manager = get_deck_manager(config) if get_deck_manager else None
+            if not self.deck_manager and DeckManager:
+                print("DEBUG: Creating new deck manager instance")
+                self.deck_manager = DeckManager()
+                self.deck_manager.set_config(config)
+        except Exception as e:
+            print(f"DEBUG: Error initializing deck manager: {e}")
+            self.deck_manager = None
 
         self.setWindowTitle("Anki Typing Practice - Settings")
         self.setModal(True)
@@ -552,7 +565,9 @@ class SettingsPanel(QDialog):
             QMessageBox.information(self, "Settings Saved", f"Field mapping saved for deck: {deck_data.deck_name}")
             self.settings_changed.emit()
             # Update the deck data in combo box
-            self.deck_combo.setItemData(current_index, self.deck_manager.get_deck(deck_data.deck_name))
+            updated_deck_data = self.deck_manager._decks_cache.get(deck_data.deck_name)
+            if updated_deck_data:
+                self.deck_combo.setItemData(current_index, updated_deck_data)
         else:
             QMessageBox.warning(self, "Save Failed", "Failed to save field mapping.")
 
@@ -718,6 +733,11 @@ class SettingsPanel(QDialog):
 
             print("DEBUG: Refreshing deck list...")
 
+            # Get current deck info and add to cache if not present
+            current_deck = self.deck_manager.get_current_deck_info()
+            if current_deck:
+                print(f"DEBUG: Current deck found: {current_deck.deck_name}")
+
             # Get all available decks
             decks = self.deck_manager.get_all_decks()
 
@@ -737,13 +757,15 @@ class SettingsPanel(QDialog):
 
             print(f"DEBUG: Loaded {len(deck_items)} decks into combo box")
 
-            # Select the last used deck if available
-            last_deck = self.deck_manager.get_last_used_deck()
-            if last_deck:
+            # Select the current deck or last used deck
+            selected_deck = current_deck or self.deck_manager.get_last_used_deck()
+            if selected_deck:
+                print(f"DEBUG: Selecting deck: {selected_deck.deck_name}")
                 for i in range(self.deck_combo.count()):
                     deck_data = self.deck_combo.itemData(i)
-                    if deck_data and deck_data.deck_name == last_deck.deck_name:
+                    if deck_data and deck_data.deck_name == selected_deck.deck_name:
                         self.deck_combo.setCurrentIndex(i)
+                        self._on_deck_changed(i)  # Update field mappings
                         break
 
         except Exception as e:
@@ -770,7 +792,18 @@ class SettingsPanel(QDialog):
             # Update deck info
             self.current_deck_label.setText(deck_data.deck_name)
             self.deck_card_count_label.setText(f"{deck_data.card_count} cards")
-            self.deck_last_used_label.setText(deck_data.last_used.strftime("%Y-%m-%d %H:%M") if deck_data.last_used else "Never")
+            # Handle both datetime and string formats for last_used
+            if deck_data.last_used:
+                try:
+                    if hasattr(deck_data.last_used, 'strftime'):
+                        last_used_text = deck_data.last_used.strftime("%Y-%m-%d %H:%M")
+                    else:
+                        last_used_text = str(deck_data.last_used)
+                except:
+                    last_used_text = "Unknown"
+            else:
+                last_used_text = "Never"
+            self.deck_last_used_label.setText(last_used_text)
 
             print(f"DEBUG: Selected deck: {deck_data.deck_name}")
 

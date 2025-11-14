@@ -156,10 +156,10 @@ class DeckManager:
         except Exception as e:
             print(f"DEBUG: Error saving decks configuration: {e}")
 
-    def _get_timestamp(self) -> str:
-        """Get current ISO timestamp."""
+    def _get_timestamp(self) -> datetime:
+        """Get current timestamp as datetime."""
         from datetime import datetime
-        return datetime.now().isoformat()
+        return datetime.now()
 
     def get_current_deck_info(self) -> Optional[DeckFieldMapping]:
         """Get information about the currently selected deck."""
@@ -189,7 +189,10 @@ class DeckManager:
                 deck_mapping.last_used = self._get_timestamp()
                 return deck_mapping
             else:
-                # Create new deck configuration
+                # Create new deck configuration with real data
+                field_names = self._get_deck_field_names(current_deck_id)
+                card_count = len(mw.col.find_cards(f"did:{current_deck_id}"))
+
                 deck_mapping = DeckFieldMapping(
                     deck_name=deck_name,
                     deck_id=current_deck_id,
@@ -197,10 +200,11 @@ class DeckManager:
                     target_field="Back",
                     audio_field="Audio",
                     last_used=self._get_timestamp(),
-                    field_names=self._get_deck_field_names(current_deck_id)
+                    field_names=field_names,
+                    card_count=card_count
                 )
                 self._decks_cache[deck_name] = deck_mapping
-                print(f"DEBUG: Created new configuration for deck: {deck_name}")
+                print(f"DEBUG: Created new configuration for deck: {deck_name} with {card_count} cards and fields: {field_names}")
                 return deck_mapping
 
         except Exception as e:
@@ -210,34 +214,86 @@ class DeckManager:
     def _get_deck_field_names(self, deck_id: int) -> list[str]:
         """Get all field names available in a deck."""
         if not mw or not mw.col:
+            print("DEBUG: No mw or mw.col available")
             return []
 
         try:
             # Get all note types used in this deck
             deck = mw.col.decks.get(deck_id)
             if not deck:
+                print(f"DEBUG: Deck {deck_id} not found")
                 return []
 
             field_names = set()
 
             # Get all cards in this deck and collect their note types
             card_ids = mw.col.find_cards(f"did:{deck_id}")
-            for cid in card_ids:
-                card = mw.col.get_card(cid)
-                if card:
-                    note = card.note()
-                    note_type = note.note_type()  # Use note_type() instead of deprecated model()
-                    if hasattr(note_type, 'flds'):
-                        for field_info in note_type['flds']:
-                            if isinstance(field_info, dict):
-                                field_name = field_info.get('name', field_info.get('fldName', ''))
-                                if field_name:
-                                    field_names.add(field_name)
+            print(f"DEBUG: Found {len(card_ids)} cards in deck {deck_id}")
 
-            return sorted(list(field_names))
+            # Limit to first few cards to avoid performance issues
+            sample_cards = card_ids[:5]
+
+            for cid in sample_cards:
+                try:
+                    card = mw.col.get_card(cid)
+                    if card:
+                        note = card.note()
+                        print(f"DEBUG: Processing note from card {cid}")
+
+                        # Method 1: Try to get field names from note model
+                        try:
+                            note_type = note.note_type()
+                            print(f"DEBUG: Note type: {note_type}")
+
+                            # Try different ways to get field names
+                            if hasattr(note_type, 'flds'):
+                                print(f"DEBUG: Note type has flds: {note_type['flds']}")
+                                for field_info in note_type['flds']:
+                                    if isinstance(field_info, dict):
+                                        field_name = field_info.get('name', field_info.get('fldName', ''))
+                                        if field_name:
+                                            field_names.add(field_name)
+                                            print(f"DEBUG: Added field name: {field_name}")
+                            else:
+                                print(f"DEBUG: Note type doesn't have flds attribute")
+
+                        except Exception as note_type_error:
+                            print(f"DEBUG: Error getting note type: {note_type_error}")
+
+                        # Method 2: Fallback - try to get field names directly from note
+                        if hasattr(note, 'fields') and note.fields:
+                            print(f"DEBUG: Note has {len(note.fields)} fields directly")
+                            # Try to find field names via model
+                            try:
+                                model = note.model()
+                                if hasattr(model, 'flds'):
+                                    for i, field_info in enumerate(model['flds']):
+                                        if i < len(note.fields):
+                                            field_name = field_info.get('name', f'Field {i}')
+                                            field_names.add(field_name)
+                                            print(f"DEBUG: Added field from model: {field_name}")
+                            except Exception as model_error:
+                                print(f"DEBUG: Error getting model: {model_error}")
+
+                        # Method 3: Last resort - check if note has _fmap which is field name map
+                        if hasattr(note, '_fmap') and note._fmap:
+                            print(f"DEBUG: Using note._fmap: {list(note._fmap.keys())}")
+                            for field_name in note._fmap.keys():
+                                field_names.add(field_name)
+
+                except Exception as card_error:
+                    print(f"DEBUG: Error processing card {cid}: {card_error}")
+                    continue
+
+            result = sorted(list(field_names))
+            print(f"DEBUG: Final field names found: {result}")
+            return result if result else ["Front", "Back", "Audio"]  # Fallback to common names
+
         except Exception as e:
             print(f"DEBUG: Error getting deck field names: {e}")
-            return []
+            import traceback
+            traceback.print_exc()
+            return ["Front", "Back", "Audio"]  # Fallback to common names
 
     def update_deck_mapping(self, deck_name: str, prompt_field: str, target_field: str, audio_field: str = None) -> bool:
         """Update field mapping for a deck."""

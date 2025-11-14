@@ -96,11 +96,17 @@ class PackageManager:
             print(f"Installing to: {install_path}")
             shutil.copytree(self.src_dir, install_path, dirs_exist_ok=True)
 
-            # Copy manifest.json
-            manifest_src = self.project_root / "manifest.json"
-            manifest_dst = install_path / "manifest.json"
-            if manifest_src.exists():
-                shutil.copy2(manifest_src, manifest_dst)
+            # Copy meta.json (required for Anki addon configuration)
+            meta_src = self.src_dir / "meta.json"
+            meta_dst = install_path / "meta.json"
+            if meta_src.exists():
+                shutil.copy2(meta_src, meta_dst)
+
+            # Copy config.json (default configuration)
+            config_src = self.src_dir / "config.json"
+            config_dst = install_path / "config.json"
+            if config_src.exists():
+                shutil.copy2(config_src, config_dst)
 
             print(f"[SUCCESS] Successfully installed {self.package_name} v{self.version}")
             print(f"Location: {install_path}")
@@ -192,11 +198,18 @@ class PackageManager:
             shutil.copytree(self.src_dir, build_dir / self.package_name)
 
             # Copy additional files
-            additional_files = ["manifest.json", "README.md", "LICENSE"]
+            additional_files = ["README.md", "LICENSE"]
             for file_name in additional_files:
                 src_file = self.project_root / file_name
                 if src_file.exists():
                     shutil.copy2(src_file, build_dir / file_name)
+
+            # Copy plugin configuration files
+            config_files = ["meta.json", "config.json"]
+            for file_name in config_files:
+                src_file = self.src_dir / file_name
+                if src_file.exists():
+                    shutil.copy2(src_file, build_dir / self.package_name / file_name)
 
             # Create package info
             package_info = {

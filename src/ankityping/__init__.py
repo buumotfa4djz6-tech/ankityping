@@ -36,7 +36,9 @@ def open_typing_practice() -> None:
         if anki_integration.is_reviewer_active():
             print("AnkiTyping: Reviewer is active, opening dialog with current card...")
         else:
-            print("AnkiTyping: Reviewer is not active, attempting to load last-used deck...")
+            print(
+                "AnkiTyping: Reviewer is not active, attempting to load last-used deck..."
+            )
 
             # Try to get the last used deck
             last_deck = deck_manager.get_last_used_deck()
@@ -45,7 +47,8 @@ def open_typing_practice() -> None:
                 # Switch to the last-used deck
                 try:
                     # Anki deck selection
-                    mw.col.decks.select(last_deck.deck_id)
+                    if mw.col is not None:
+                        mw.col.decks.select(last_deck.deck_id)
                     print(f"AnkiTyping: Switched to deck: {last_deck.deck_name}")
                 except Exception as deck_error:
                     print(f"AnkiTyping: Failed to switch to deck: {deck_error}")
@@ -73,6 +76,7 @@ def open_settings() -> None:
 
     try:
         from .config import get_config
+
         config = get_config()
         dialog = SettingsPanel(config, mw)
         dialog.exec()
