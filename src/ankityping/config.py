@@ -19,6 +19,8 @@ class UIConfig:
     window_width: int = 600
     window_height: int = 400
     always_on_top: bool = False
+    font_family: str = "Arial"
+    font_size: int = 12
 
 
 @dataclass
@@ -77,6 +79,8 @@ class Config:
     field_mapping: FieldMapping = field(default_factory=FieldMapping)
     field_processing: FieldProcessingConfig = field(default_factory=FieldProcessingConfig)
     input_processing: InputProcessingConfig = field(default_factory=InputProcessingConfig)
+    deck_settings: Dict[str, Dict[str, Any]] = field(default_factory=dict)  # deck_name -> deck_config
+    last_used_deck: Optional[str] = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> Config:
@@ -89,6 +93,8 @@ class Config:
             config.ui.window_width = ui_data.get("window_width", config.ui.window_width)
             config.ui.window_height = ui_data.get("window_height", config.ui.window_height)
             config.ui.always_on_top = ui_data.get("always_on_top", config.ui.always_on_top)
+            config.ui.font_family = ui_data.get("font_family", config.ui.font_family)
+            config.ui.font_size = ui_data.get("font_size", config.ui.font_size)
 
         if "behavior" in data:
             behavior_data = data["behavior"]
@@ -132,6 +138,14 @@ class Config:
             config.field_mapping.target = field_data.get("target", config.field_mapping.target)
             config.field_mapping.audio = field_data.get("audio", config.field_mapping.audio)
 
+        # Deck settings
+        if "deckSettings" in data:
+            config.deck_settings = data["deckSettings"]
+
+        # Last used deck
+        if "lastUsedDeck" in data:
+            config.last_used_deck = data["lastUsedDeck"]
+
         return config
 
     def to_dict(self) -> Dict[str, Any]:
@@ -142,6 +156,8 @@ class Config:
                 "window_width": self.ui.window_width,
                 "window_height": self.ui.window_height,
                 "always_on_top": self.ui.always_on_top,
+                "font_family": self.ui.font_family,
+                "font_size": self.ui.font_size,
             },
             "behavior": {
                 "resetMode": self.behavior.reset_mode,
@@ -179,6 +195,8 @@ class Config:
                 "target": self.field_mapping.target,
                 "audio": self.field_mapping.audio,
             },
+            "deckSettings": self.deck_settings,
+            "lastUsedDeck": self.last_used_deck,
         }
 
 

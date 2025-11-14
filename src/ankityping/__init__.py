@@ -30,7 +30,7 @@ def open_typing_practice() -> None:
 
         config = get_config()
         anki_integration = AnkiIntegration(config)
-        deck_manager = get_deck_manager()
+        deck_manager = get_deck_manager(config)
 
         # Check if reviewer is active
         if anki_integration.is_reviewer_active():

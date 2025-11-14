@@ -38,7 +38,94 @@ class DeckManager:
         self.decks_file = Path(__file__).parent.parent.parent.parent / "data" / "decks.json"
         self.decks_file.parent.mkdir(parents=True, exist_ok=True)
         self._decks_cache: Dict[str, DeckFieldMapping] = {}
+        self._config = None  # Main plugin config
         self._load_decks()
+
+    def set_config(self, config) -> None:
+        """Set the main plugin config object."""
+        self._config = config
+        # Load deck settings from main config
+        self._load_from_config()
+
+    def _load_from_config(self) -> None:
+        """Load deck settings from the main config object."""
+        if not self._config:
+            return
+
+        try:
+            # Load deck settings from main config
+            if hasattr(self._config, 'deck_settings') and self._config.deck_settings:
+                for deck_name, deck_data in self._config.deck_settings.items():
+                    deck_mapping = DeckFieldMapping(
+                        deck_name=deck_name,
+                        deck_id=deck_data.get('deck_id', 0),
+                        prompt_field=deck_data.get('prompt_field', 'Front'),
+                        target_field=deck_data.get('target_field', 'Back'),
+                        audio_field=deck_data.get('audio_field', 'Audio'),
+                        field_names=deck_data.get('field_names', []),
+                        card_count=deck_data.get('card_count', 0),
+                        last_used=self._parse_last_used(deck_data.get('last_used'))
+                    )
+                    self._decks_cache[deck_name] = deck_mapping
+                print(f"DEBUG: Loaded {len(self._decks_cache)} deck configurations from main config")
+
+        except Exception as e:
+            print(f"DEBUG: Error loading deck settings from config: {e}")
+
+    def _save_to_config(self) -> None:
+        """Save deck settings to the main config object."""
+        if not self._config:
+            return
+
+        try:
+            # Convert deck cache to config format
+            deck_settings = {}
+            for deck_name, deck_mapping in self._decks_cache.items():
+                deck_settings[deck_name] = {
+                    'deck_id': deck_mapping.deck_id,
+                    'prompt_field': deck_mapping.prompt_field,
+                    'target_field': deck_mapping.target_field,
+                    'audio_field': deck_mapping.audio_field,
+                    'field_names': deck_mapping.field_names,
+                    'card_count': deck_mapping.card_count,
+                    'last_used': self._format_last_used(deck_mapping.last_used)
+                }
+
+            # Save to config object
+            self._config.deck_settings = deck_settings
+
+            # Mark config as dirty so it gets saved
+            try:
+                from ..config import save_config
+                save_config(self._config)
+            except ImportError:
+                try:
+                    from ankityping.config import save_config
+                    save_config(self._config)
+                except ImportError as e:
+                    print(f"DEBUG: Failed to import save_config in deck_manager: {e}")
+                    # Continue without saving - better than crashing
+                    return
+
+            print(f"DEBUG: Saved {len(deck_settings)} deck configurations to main config")
+
+        except Exception as e:
+            print(f"DEBUG: Error saving deck settings to config: {e}")
+
+    def _parse_last_used(self, last_used_str: Optional[str]) -> Optional[datetime]:
+        """Parse last used string to datetime."""
+        if not last_used_str:
+            return None
+        try:
+            return datetime.fromisoformat(last_used_str)
+        except:
+            return None
+
+    def _format_last_used(self, last_used_dt: Optional[datetime]) -> Optional[str]:
+        """Format datetime to string."""
+        if not last_used_dt:
+            return None
+        return last_used_dt.isoformat()
 
     def _load_decks(self) -> None:
         """Load deck configurations from file."""
@@ -139,7 +226,7 @@ class DeckManager:
                 card = mw.col.get_card(cid)
                 if card:
                     note = card.note()
-                    note_type = note.model()
+                    note_type = note.note_type()  # Use note_type() instead of deprecated model()
                     if hasattr(note_type, 'flds'):
                         for field_info in note_type['flds']:
                             if isinstance(field_info, dict):
@@ -164,7 +251,8 @@ class DeckManager:
         deck_mapping.audio_field = audio_field
         deck_mapping.last_used = self._get_timestamp()
 
-        self._save_decks()
+        # Save to main config instead of separate file
+        self._save_to_config()
         print(f"DEBUG: Updated field mapping for deck: {deck_name}")
         return True
 
@@ -282,9 +370,12 @@ class DeckManager:
 _deck_manager: Optional[DeckManager] = None
 
 
-def get_deck_manager() -> DeckManager:
+def get_deck_manager(config=None) -> DeckManager:
     """Get the global deck manager instance."""
     global _deck_manager
     if _deck_manager is None:
         _deck_manager = DeckManager()
+    # Set config if provided and not already set
+    if config and not _deck_manager._config:
+        _deck_manager.set_config(config)
     return _deck_manager

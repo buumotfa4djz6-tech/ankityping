@@ -438,7 +438,7 @@ class TypingDialog(QMainWindow):
         try:
             # Get deck manager for field mappings
             from ..utils import get_deck_manager
-            deck_manager = get_deck_manager()
+            deck_manager = get_deck_manager(self.config)
 
             # Check if reviewer is active and get card data
             if self.anki_integration.is_reviewer_active():

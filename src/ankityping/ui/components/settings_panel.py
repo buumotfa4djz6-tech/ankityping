@@ -27,7 +27,7 @@ class SettingsPanel(QDialog):
     def __init__(self, config, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.config = config
-        self.deck_manager = get_deck_manager() if get_deck_manager else None
+        self.deck_manager = get_deck_manager(config) if get_deck_manager else None
 
         self.setWindowTitle("Anki Typing Practice - Settings")
         self.setModal(True)
@@ -69,19 +69,37 @@ class SettingsPanel(QDialog):
         widget = QWidget()
         layout = QVBoxLayout(widget)
 
-        # Current deck info
-        info_group = QGroupBox("Current Deck Information")
-        info_layout = QFormLayout(info_group)
+        # Deck selection
+        deck_group = QGroupBox("Deck Configuration")
+        deck_layout = QVBoxLayout(deck_group)
 
-        self.current_deck_label = QLabel("Loading...")
+        # Deck selector
+        deck_selector_layout = QHBoxLayout()
+        deck_selector_layout.addWidget(QLabel("Select Deck:"))
+
+        self.deck_combo = QComboBox()
+        self.deck_combo.setMinimumWidth(200)
+        deck_selector_layout.addWidget(self.deck_combo)
+
+        refresh_button = QPushButton("Refresh")
+        refresh_button.clicked.connect(self._refresh_decks)
+        deck_selector_layout.addWidget(refresh_button)
+
+        deck_layout.addLayout(deck_selector_layout)
+
+        # Deck info
+        self.current_deck_label = QLabel("No deck selected")
         self.deck_card_count_label = QLabel("0 cards")
         self.deck_last_used_label = QLabel("Never")
 
-        info_layout.addRow("Deck:", self.current_deck_label)
-        info_layout.addRow("Cards:", self.deck_card_count_label)
-        info_layout.addRow("Last Used:", self.deck_last_used_label)
+        deck_info_layout = QFormLayout()
+        deck_info_layout.addRow("Selected:", self.current_deck_label)
+        deck_info_layout.addRow("Cards:", self.deck_card_count_label)
+        deck_info_layout.addRow("Last Used:", self.deck_last_used_label)
 
-        layout.addWidget(info_group)
+        deck_layout.addLayout(deck_info_layout)
+
+        layout.addWidget(deck_group)
 
         # Field mapping
         mapping_group = QGroupBox("Field Mapping")
@@ -227,6 +245,20 @@ class SettingsPanel(QDialog):
 
         layout.addWidget(case_group)
 
+        # Diacritics handling
+        diacritics_group = QGroupBox("Diacritics Handling")
+        diacritics_layout = QGridLayout(diacritics_group)
+
+        self.handle_diacritics_checkbox = QCheckBox("Enable diacritics processing")
+        self.handle_diacritics_checkbox.setChecked(self.config.input_processing.handle_diacritics)
+        self.ignore_diacritic_errors_checkbox = QCheckBox("Ignore diacritic errors")
+        self.ignore_diacritic_errors_checkbox.setChecked(self.config.input_processing.ignore_diacritic_errors)
+
+        diacritics_layout.addWidget(self.handle_diacritics_checkbox, 0, 0, 1, 1)
+        diacritics_layout.addWidget(self.ignore_diacritic_errors_checkbox, 0, 1, 1, 1)
+
+        layout.addWidget(diacritics_group)
+
         layout.addStretch()
         self.tab_widget.addTab(widget, "Input Processing")
 
@@ -253,12 +285,73 @@ class SettingsPanel(QDialog):
         self.always_on_top_checkbox.setChecked(self.config.ui.always_on_top)
         self.auto_focus_checkbox = QCheckBox("Auto-focus on load")
         self.auto_focus_checkbox.setChecked(self.config.behavior.auto_focus)
+        self.show_completion_popup_checkbox = QCheckBox("Show completion popup")
+        self.show_completion_popup_checkbox.setChecked(self.config.behavior.show_completion_popup)
 
         window_layout.addRow("Always on Top:", self.always_on_top_checkbox)
         window_layout.addRow("Auto-focus:", self.auto_focus_checkbox)
+        window_layout.addRow("Completion Popup:", self.show_completion_popup_checkbox)
 
         layout.addWidget(theme_group)
         layout.addWidget(window_group)
+
+        # Font settings
+        font_group = QGroupBox("Font Settings")
+        font_layout = QFormLayout(font_group)
+
+        self.font_family_combo = QComboBox()
+        self.font_family_combo.addItems(["Arial", "Consolas", "Courier New", "Monaco", "Menlo", "Verdana", "Tahoma"])
+        self.font_family_combo.setCurrentText(self.config.ui.font_family)
+
+        self.font_size_spin = QSpinBox()
+        self.font_size_spin.setRange(8, 48)
+        self.font_size_spin.setValue(self.config.ui.font_size)
+
+        font_layout.addRow("Font Family:", self.font_family_combo)
+        font_layout.addRow("Font Size:", self.font_size_spin)
+
+        layout.addWidget(font_group)
+
+        # Window size
+        size_group = QGroupBox("Window Size")
+        size_layout = QFormLayout(size_group)
+
+        self.window_width_spin = QSpinBox()
+        self.window_width_spin.setRange(400, 2000)
+        self.window_width_spin.setValue(self.config.ui.window_width)
+
+        self.window_height_spin = QSpinBox()
+        self.window_height_spin.setRange(300, 1500)
+        self.window_height_spin.setValue(self.config.ui.window_height)
+
+        size_layout.addRow("Width:", self.window_width_spin)
+        size_layout.addRow("Height:", self.window_height_spin)
+
+        layout.addWidget(size_group)
+
+        # Behavior settings
+        behavior_group = QGroupBox("Behavior Settings")
+        behavior_layout = QFormLayout(behavior_group)
+
+        self.input_mode_combo = QComboBox()
+        self.input_mode_combo.addItems(["progressive", "accompanying"])
+        self.input_mode_combo.setCurrentText(self.config.behavior.input_mode)
+
+        self.auto_play_audio_checkbox = QCheckBox("Auto-play audio")
+        self.auto_play_audio_checkbox.setChecked(self.config.behavior.auto_play_audio)
+
+        self.show_timer_checkbox = QCheckBox("Show timer")
+        self.show_timer_checkbox.setChecked(self.config.behavior.show_timer)
+
+        self.show_errors_checkbox = QCheckBox("Show errors")
+        self.show_errors_checkbox.setChecked(self.config.behavior.show_errors)
+
+        behavior_layout.addRow("Input Mode:", self.input_mode_combo)
+        behavior_layout.addRow("Auto-play Audio:", self.auto_play_audio_checkbox)
+        behavior_layout.addRow("Show Timer:", self.show_timer_checkbox)
+        behavior_layout.addRow("Show Errors:", self.show_errors_checkbox)
+
+        layout.addWidget(behavior_group)
 
         layout.addStretch()
         self.tab_widget.addTab(widget, "UI Settings")
@@ -322,6 +415,11 @@ class SettingsPanel(QDialog):
         self.auto_correct_spaces_checkbox.toggled.connect(self._update_config)
         self.case_sensitive_checkbox.toggled.connect(self._update_config)
         self.auto_correct_case_checkbox.toggled.connect(self._update_config)
+        self.handle_diacritics_checkbox.toggled.connect(self._update_config)
+        self.ignore_diacritic_errors_checkbox.toggled.connect(self._update_config)
+
+        # Deck selection
+        self.deck_combo.currentIndexChanged.connect(self._on_deck_changed)
 
         # UI settings
         self.theme_combo.currentTextChanged.connect(self._update_config)
@@ -347,11 +445,24 @@ class SettingsPanel(QDialog):
         self.config.input_processing.auto_correct_spaces = self.auto_correct_spaces_checkbox.isChecked()
         self.config.input_processing.case_sensitive = self.case_sensitive_checkbox.isChecked()
         self.config.input_processing.auto_correct_case = self.auto_correct_case_checkbox.isChecked()
+        self.config.input_processing.handle_diacritics = self.handle_diacritics_checkbox.isChecked()
+        self.config.input_processing.ignore_diacritic_errors = self.ignore_diacritic_errors_checkbox.isChecked()
 
         # UI settings
-        self.config.ui.theme = self.theme_combo.currentText()
+        self.config.ui.theme = self.theme_combo.currentText().lower()
+        self.config.ui.font_family = self.font_family_combo.currentText()
+        self.config.ui.font_size = self.font_size_spin.value()
+        self.config.ui.window_width = self.window_width_spin.value()
+        self.config.ui.window_height = self.window_height_spin.value()
         self.config.ui.always_on_top = self.always_on_top_checkbox.isChecked()
+
+        # Behavior settings
         self.config.behavior.auto_focus = self.auto_focus_checkbox.isChecked()
+        self.config.behavior.show_completion_popup = self.show_completion_popup_checkbox.isChecked()
+        self.config.behavior.show_timer = self.show_timer_checkbox.isChecked()
+        self.config.behavior.show_errors = self.show_errors_checkbox.isChecked()
+        self.config.behavior.input_mode = self.input_mode_combo.currentText().lower()
+        self.config.behavior.auto_play_audio = self.auto_play_audio_checkbox.isChecked()
 
         # Emit signal
         self.settings_changed.emit()
@@ -416,22 +527,32 @@ class SettingsPanel(QDialog):
                 self.audio_field_combo.setCurrentIndex(index)
 
     def _save_deck_mapping(self) -> None:
-        """Save field mapping for current deck."""
+        """Save field mapping for selected deck."""
         if not self.deck_manager:
             return
 
-        deck_info = self.deck_manager.get_current_deck_info()
-        if not deck_info:
-            QMessageBox.warning(self, "No Deck", "No deck information available.")
+        current_index = self.deck_combo.currentIndex()
+        if current_index < 0:
+            QMessageBox.warning(self, "No Deck", "Please select a deck first.")
+            return
+
+        deck_data = self.deck_combo.itemData(current_index)
+        if not deck_data:
+            QMessageBox.warning(self, "No Deck", "No deck selected.")
             return
 
         prompt_field = self.prompt_field_combo.currentText()
         target_field = self.target_field_combo.currentText()
-        audio_field = self.audio_field_combo.currentData() if self.audio_field_combo.currentData() else None
+        audio_field = self.audio_field_combo.currentText()
 
-        if self.deck_manager.update_deck_mapping(deck_info.deck_name, prompt_field, target_field, audio_field):
-            QMessageBox.information(self, "Settings Saved", f"Field mapping saved for deck: {deck_info.deck_name}")
+        if audio_field == "None" or not audio_field.strip():
+            audio_field = None
+
+        if self.deck_manager.update_deck_mapping(deck_data.deck_name, prompt_field, target_field, audio_field):
+            QMessageBox.information(self, "Settings Saved", f"Field mapping saved for deck: {deck_data.deck_name}")
             self.settings_changed.emit()
+            # Update the deck data in combo box
+            self.deck_combo.setItemData(current_index, self.deck_manager.get_deck(deck_data.deck_name))
         else:
             QMessageBox.warning(self, "Save Failed", "Failed to save field mapping.")
 
@@ -508,7 +629,10 @@ class SettingsPanel(QDialog):
     def accept(self) -> None:
         """Save all settings and close the dialog."""
         try:
+            print("DEBUG: Starting settings save process...")
+
             # Save field processing settings
+            print("DEBUG: Saving field processing settings...")
             self.config.field_processing.remove_html_tags = self.remove_html_tags_checkbox.isChecked()
             self.config.field_processing.preserve_line_breaks = self.preserve_line_breaks_checkbox.isChecked()
             self.config.field_processing.handle_html_entities = self.handle_html_entities_checkbox.isChecked()
@@ -517,6 +641,7 @@ class SettingsPanel(QDialog):
             self.config.field_processing.remove_extra_spaces = self.remove_extra_spaces_checkbox.isChecked()
 
             # Save input processing settings
+            print("DEBUG: Saving input processing settings...")
             self.config.input_processing.handle_punctuation = self.handle_punctuation_checkbox.isChecked()
             self.config.input_processing.auto_punctuation = self.auto_punctuation_checkbox.isChecked()
             self.config.input_processing.ignore_punctuation_errors = self.ignore_punctuation_errors_checkbox.isChecked()
@@ -529,34 +654,155 @@ class SettingsPanel(QDialog):
             self.config.input_processing.ignore_diacritic_errors = self.ignore_diacritic_errors_checkbox.isChecked()
 
             # Save UI settings
+            print("DEBUG: Saving UI settings...")
             self.config.ui.theme = self.theme_combo.currentText().lower()
             self.config.ui.font_family = self.font_family_combo.currentText()
             self.config.ui.font_size = self.font_size_spin.value()
             self.config.ui.window_width = self.window_width_spin.value()
             self.config.ui.window_height = self.window_height_spin.value()
             self.config.ui.always_on_top = self.always_on_top_checkbox.isChecked()
-            self.config.ui.show_completion_popup = self.show_completion_popup_checkbox.isChecked()
-            self.config.ui.auto_focus = self.auto_focus_checkbox.isChecked()
-            self.config.ui.show_timer = self.show_timer_checkbox.isChecked()
-            self.config.ui.show_errors = self.show_errors_checkbox.isChecked()
+
+            # Save behavior settings
+            print("DEBUG: Saving behavior settings...")
+            self.config.behavior.show_completion_popup = self.show_completion_popup_checkbox.isChecked()
+            self.config.behavior.auto_focus = self.auto_focus_checkbox.isChecked()
+            self.config.behavior.show_timer = self.show_timer_checkbox.isChecked()
+            self.config.behavior.show_errors = self.show_errors_checkbox.isChecked()
             self.config.behavior.input_mode = self.input_mode_combo.currentText().lower()
             self.config.behavior.auto_play_audio = self.auto_play_audio_checkbox.isChecked()
 
             # Save the config
-            from ..config import save_config
-            save_config(self.config)
+            print("DEBUG: Attempting to save config...")
+            try:
+                from ..config import save_config
+                print("DEBUG: Imported save_config successfully with relative import")
+                save_config(self.config)
+                print("DEBUG: save_config completed successfully")
+            except ImportError as import_error:
+                print(f"DEBUG: Import error for save_config: {import_error}")
+                # Fallback - try absolute import
+                try:
+                    from ankityping.config import save_config
+                    print("DEBUG: Imported save_config with absolute import")
+                    save_config(self.config)
+                    print("DEBUG: save_config completed with absolute import")
+                except ImportError as fallback_error:
+                    print(f"DEBUG: Fallback import also failed: {fallback_error}")
+                    raise Exception(f"Unable to import save_config: {fallback_error}")
 
             print("DEBUG: Settings saved successfully")
             self.settings_changed.emit()
 
             # Call parent accept to close the dialog
+            print("DEBUG: Calling parent accept...")
             super().accept()
 
         except Exception as e:
+            import traceback
             print(f"ERROR: Failed to save settings: {e}")
+            print("DEBUG: Full traceback:")
+            traceback.print_exc()
             QMessageBox.critical(self, "Save Failed", f"Failed to save settings: {e}")
 
     def apply_settings(self) -> None:
         """Apply all settings and close the panel."""
         self.settings_changed.emit()
         self.close_requested.emit()
+
+    def _refresh_decks(self) -> None:
+        """Refresh the list of available decks."""
+        try:
+            if not self.deck_manager:
+                print("DEBUG: Deck manager not available")
+                return
+
+            print("DEBUG: Refreshing deck list...")
+
+            # Get all available decks
+            decks = self.deck_manager.get_all_decks()
+
+            # Clear and repopulate combo box
+            self.deck_combo.clear()
+
+            deck_items = []
+            for deck in decks:
+                deck_text = f"{deck.deck_name} ({deck.card_count} cards)"
+                deck_items.append((deck_text, deck))
+
+            # Sort by deck name
+            deck_items.sort(key=lambda x: x[1].deck_name)
+
+            for deck_text, deck in deck_items:
+                self.deck_combo.addItem(deck_text, deck)
+
+            print(f"DEBUG: Loaded {len(deck_items)} decks into combo box")
+
+            # Select the last used deck if available
+            last_deck = self.deck_manager.get_last_used_deck()
+            if last_deck:
+                for i in range(self.deck_combo.count()):
+                    deck_data = self.deck_combo.itemData(i)
+                    if deck_data and deck_data.deck_name == last_deck.deck_name:
+                        self.deck_combo.setCurrentIndex(i)
+                        break
+
+        except Exception as e:
+            print(f"DEBUG: Error refreshing decks: {e}")
+            QMessageBox.critical(self, "Error", f"Failed to refresh decks: {e}")
+
+    def _on_deck_changed(self, index: int) -> None:
+        """Handle deck selection change."""
+        try:
+            if index < 0 or not self.deck_manager:
+                self.current_deck_label.setText("No deck selected")
+                self.deck_card_count_label.setText("0 cards")
+                self.deck_last_used_label.setText("Never")
+                # Clear field combos
+                self.prompt_field_combo.clear()
+                self.target_field_combo.clear()
+                self.audio_field_combo.clear()
+                return
+
+            deck_data = self.deck_combo.itemData(index)
+            if not deck_data:
+                return
+
+            # Update deck info
+            self.current_deck_label.setText(deck_data.deck_name)
+            self.deck_card_count_label.setText(f"{deck_data.card_count} cards")
+            self.deck_last_used_label.setText(deck_data.last_used.strftime("%Y-%m-%d %H:%M") if deck_data.last_used else "Never")
+
+            print(f"DEBUG: Selected deck: {deck_data.deck_name}")
+
+            # Update field combos
+            self.prompt_field_combo.clear()
+            self.target_field_combo.clear()
+            self.audio_field_combo.clear()
+
+            # Add common field names plus deck-specific fields
+            common_fields = ["Front", "Back", "Expression", "Meaning", "Reading", "Sentence", "Translation", "Audio", "Sound", "Notes", "Extra"]
+            all_fields = list(set(common_fields + deck_data.field_names))
+            all_fields.sort()  # Sort alphabetically
+
+            for field_name in all_fields:
+                self.prompt_field_combo.addItem(field_name)
+                self.target_field_combo.addItem(field_name)
+                self.audio_field_combo.addItem(field_name)
+
+            # Set current selections if deck has saved mapping
+            if deck_data.prompt_field:
+                self.prompt_field_combo.setCurrentText(deck_data.prompt_field)
+            if deck_data.target_field:
+                self.target_field_combo.setCurrentText(deck_data.target_field)
+            if deck_data.audio_field:
+                self.audio_field_combo.setCurrentText(deck_data.audio_field)
+
+        except Exception as e:
+            print(f"DEBUG: Error handling deck change: {e}")
+
+    def showEvent(self, event) -> None:
+        """Initialize when the dialog is shown."""
+        super().showEvent(event)
+        # Refresh decks on first show
+        if hasattr(self, 'deck_combo'):
+            self._refresh_decks()

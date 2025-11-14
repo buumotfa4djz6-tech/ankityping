@@ -102,26 +102,87 @@ class AnkiIntegration:
 
         # Debug: List all available fields in this note
         try:
-            if hasattr(note, 'note_type'):
-                model = note.note_type()
-            else:
-                model = note.model()
+            # Use note_type() instead of deprecated model()
+            note_type = note.note_type()
 
             available_fields = []
-            if hasattr(model, 'flds'):
-                for field_info in model.flds:
-                    if isinstance(field_info, dict):
-                        field_name = field_info.get('name', field_info.get('fldName', ''))
-                    else:
-                        field_name = str(field_info)
-                    available_fields.append(field_name)
+            field_names_to_values = {}
+
+            # Get field names from note type - try multiple approaches
+            try:
+                # Method 1: Direct access to flds
+                if hasattr(note_type, 'flds') and note_type.flds:
+                    for field_info in note_type.flds:
+                        if isinstance(field_info, dict):
+                            field_name = field_info.get('name', field_info.get('fldName', ''))
+                        else:
+                            field_name = str(field_info)
+                        if field_name:  # Only add non-empty field names
+                            available_fields.append(field_name)
+
+                # Method 2: Try model()['flds'] as fallback
+                if not available_fields:
+                    try:
+                        model_data = note_type.model() if hasattr(note_type, 'model') else None
+                        if model_data and 'flds' in model_data:
+                            for field_info in model_data['flds']:
+                                if isinstance(field_info, dict):
+                                    field_name = field_info.get('name', field_info.get('fldName', ''))
+                                else:
+                                    field_name = str(field_info)
+                                if field_name:
+                                    available_fields.append(field_name)
+                    except:
+                        pass
+
+                # Method 3: Last resort - use generic names based on field count
+                if not available_fields and hasattr(note, 'fields'):
+                    field_count = len(note.fields)
+                    available_fields = [f"Field {i}" for i in range(field_count)]
+                    print(f"DEBUG: Using generic field names: {available_fields}")
+
                 print(f"DEBUG: Available fields in note: {available_fields}")
 
-            # Also show note.fields count
+            except Exception as field_error:
+                print(f"DEBUG: Error extracting field names: {field_error}")
+                # Fallback to generic names
+                if hasattr(note, 'fields'):
+                    field_count = len(note.fields)
+                    available_fields = [f"Field {i}" for i in range(field_count)]
+
+            # Show field names with their values
             if hasattr(note, 'fields'):
                 print(f"DEBUG: Note has {len(note.fields)} fields")
                 for i, field_val in enumerate(note.fields):
-                    print(f"DEBUG: Field {i}: '{field_val}'")
+                    if i < len(available_fields):
+                        field_name = available_fields[i]
+                    else:
+                        field_name = f"Field {i}"
+                    field_names_to_values[field_name] = field_val
+                    print(f"DEBUG: Field {i} ({field_name}): '{field_val}'")
+
+            # Suggest field mappings if the configured ones don't exist
+            if available_fields and (prompt_field not in available_fields or target_field not in available_fields):
+                print(f"DEBUG: CONFIGURED FIELDS NOT FOUND!")
+                print(f"DEBUG: Looking for prompt='{prompt_field}', target='{target_field}'")
+
+                # Try to auto-detect the best field mappings
+                prompt_suggestions = []
+                target_suggestions = []
+
+                for field_name in available_fields:
+                    field_value = field_names_to_values.get(field_name, '')
+
+                    # Heuristics for prompt field (usually shorter, single word/phrase)
+                    if len(field_value.split()) <= 3 and field_value and not field_value.startswith('[sound:'):
+                        prompt_suggestions.append((field_name, field_value))
+
+                    # Heuristics for target field (usually longer, definition/explanation)
+                    if len(field_value.split()) > 3 and field_value and not field_value.startswith('[sound:'):
+                        target_suggestions.append((field_name, field_value))
+
+                print(f"DEBUG: SUGGESTED PROMPT FIELDS: {prompt_suggestions}")
+                print(f"DEBUG: SUGGESTED TARGET FIELDS: {target_suggestions}")
 
         except Exception as debug_error:
             print(f"DEBUG: Error listing available fields: {debug_error}")
@@ -165,11 +226,8 @@ class AnkiIntegration:
                     return str(value)
 
             # Method 2: Try to get field index from note_type (traditional method)
-            if hasattr(note, 'note_type'):
-                model = note.note_type()
-            else:
-                model = note.model()  # Fallback for older versions
-            flds = model.get("flds", [])
+            note_type = note.note_type()
+            flds = note_type.get("flds", [])
 
             field_index = None
             for i, field_info in enumerate(flds):
@@ -194,10 +252,7 @@ class AnkiIntegration:
                 return note.fields[field_index]
 
             # Method 3: Fallback - try to find field by index in note_type()['flds'] with different approach
-            if hasattr(note, 'note_type'):
-                note_model = note.note_type()
-            else:
-                note_model = note.model()
+            note_model = note.note_type()
             if 'flds' in note_model:
                 for i, field_info in enumerate(note_model['flds']):
                     if isinstance(field_info, dict):
@@ -763,7 +818,7 @@ class AnkiIntegration:
                 prompt=prompt or "",
                 target=target or "",
                 audio=audio,
-                note_type=(note.note_type()["name"] if hasattr(note, 'note_type') else note.model()["name"])
+                note_type=note.note_type()["name"]
             )
 
         except Exception as e:
