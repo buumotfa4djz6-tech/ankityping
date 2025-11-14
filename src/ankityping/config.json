@@ -1,6 +1,6 @@
 {
   "ui": {
-    "theme": "dark",
+    "theme": "light",
     "window_width": 600,
     "window_height": 400,
     "always_on_top": false,
